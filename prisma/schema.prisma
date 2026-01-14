@@ -1,0 +1,128 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------
+// MODELOS DE USUÁRIOS E DADOS PESSOAIS
+// ----------------------------------------------------
+
+model Paciente {
+  id                        Int      @id @default(autoincrement())
+  
+  // DADOS DE LOGIN
+  telefone                  String   @unique // Novo campo de login e único
+  senhaHash                 String
+  
+  // DADOS PESSOAIS E DE CONTATO
+  nomeCompleto              String?
+  nomeSocialApelido         String
+  dataNascimento            DateTime?
+  sexo                      String // (Ex: Masculino, Feminino, Não-binário, Outro)
+  email                     String? // Mantido, mas não mais obrigatório/único para login
+  
+  // ENDEREÇO E CONTATO
+  cidade                    String?
+  estado                    String?
+  
+  // DADOS FÍSICOS E METAS
+  alturaCm                  Float?
+  // Peso não é armazenado aqui, mas no HistoricoPeso para rastreamento
+  objetivoCorporalPrincipal String?   @map("objetivo_corporal_principal")
+
+  // CONTEXTO PESSOAL E SOCIAL
+  estadoCivil               String?   @map("estado_civil")
+  moraComAlguem             String?   @map("mora_com_alguem") // (sozinha / parceiro(a) / filhos / pais / outros)
+  temFilhos                 Boolean?  @map("tem_filhos")
+  temPets                   Boolean?  @map("tem_pets")
+  profissao                 String?
+  cargaHorariaTrabalho      String?   @map("carga_horaria_trabalho") // Ex: Integral, Meio-período, Freelancer, etc.
+  
+  // DESAFIOS E EXPECTATIVAS
+  maiorDesafioHoje          String?   @map("maior_desafio_hoje")
+  oQueEsperaConquistar      String?   @map("o_que_espera_conquistar")
+  informacoesGerais         String?  @map("informacoes_gerais")
+
+  // METADADOS
+  dataCadastro              DateTime @default(now())
+
+  // RELAÇÕES
+  historicoPesos            HistoricoPeso[]
+  questionariosConcluidos   QuestionarioConcluido[]
+
+  @@map("pacientes")
+}
+
+model HistoricoPeso {
+  id              Int      @id @default(autoincrement())
+  pacienteId      Int
+  pesoKg          Float
+  dataRegistro    DateTime @default(now())
+
+  paciente        Paciente @relation(fields: [pacienteId], references: [id])
+
+  @@map("historico_pesos")
+}
+
+// ----------------------------------------------------
+// MODELOS DE QUESTIONÁRIO (WHIM)
+// ----------------------------------------------------
+
+model Pilar {
+  id                Int       @id @default(autoincrement())
+  nomePilar         String    @unique @map("nome_pilar")
+  descricao         String?
+  pontuacaoMaxima   Int       @map("pontuacao_maxima")
+  
+  perguntas         Pergunta[]
+  pontuacoes        PontuacaoPorPilar[]
+
+  @@map("pilares")
+}
+
+model Pergunta {
+  id            Int     @id @default(autoincrement())
+  pilarId       Int
+  textoPergunta String  @map("texto_pergunta")
+  ordem         Int
+  ehInvertida   Boolean @default(false) @map("eh_invertida")
+
+  pilar         Pilar   @relation(fields: [pilarId], references: [id])
+
+  @@map("perguntas")
+}
+
+model QuestionarioConcluido {
+  id                Int      @id @default(autoincrement())
+  pacienteId        Int
+  pontuacaoTotal    Int      @map("pontuacao_total")
+  percentualGlobal  Float    @map("percentual_global")
+  classificacao     String
+  dataConclusao     DateTime @default(now()) @map("data_conclusao")
+
+  paciente          Paciente            @relation(fields: [pacienteId], references: [id])
+  pontuacoes        PontuacaoPorPilar[]
+
+  // Garante que o paciente pode responder no máximo uma vez por mês
+  @@unique([pacienteId, dataConclusao], name: "unique_monthly_submission")
+  @@map("questionarios_concluidos")
+}
+
+model PontuacaoPorPilar {
+  id                        Int                     @id @default(autoincrement())
+  questionarioConcluidoId   Int                     @map("questionario_concluido_id")
+  pilarId                   Int
+  pontuacaoObtida           Int                     @map("pontuacao_obtida")
+
+  questionarioConcluido     QuestionarioConcluido   @relation(fields: [questionarioConcluidoId], references: [id])
+  pilar                     Pilar                   @relation(fields: [pilarId], references: [id])
+
+  @@map("pontuacoes_por_pilar")
+}
