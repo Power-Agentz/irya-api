@@ -511,6 +511,42 @@ app.get("/admin/pacientes", authenticateService, async (req, res) => {
     });
   }
 });
+app.put(
+  "/integrations/pacientes/telefone/:telefone",
+  authenticateService,
+  async (req, res) => {
+    const { telefone } = req.params;
+    const dadosAtualizaveis = req.body;
+
+    try {
+      const paciente = await prisma.paciente.update({
+        where: { telefone },
+        data: dadosAtualizaveis,
+      });
+
+      res.json({
+        message: "Paciente atualizado com sucesso.",
+        paciente: {
+          id: paciente.id,
+          telefone: paciente.telefone,
+          nomeSocialApelido: paciente.nomeSocialApelido,
+        },
+      });
+    } catch (e) {
+      if (e.code === "P2025") {
+        return res.status(404).json({
+          error: "Paciente não encontrado para este telefone.",
+        });
+      }
+
+      console.error("Erro ao atualizar paciente via integração:", e);
+      res.status(500).json({
+        error: "Erro interno ao atualizar paciente.",
+      });
+    }
+  }
+);
+
 
 async function startServer() {
   try {
