@@ -16,8 +16,8 @@ app.get("/", (req, res) => {
   res.send("API WHIM está rodando!");
 });
 
-/* Middleware de autenticação JWT */
 console.log("DATABASE_URL exists?", !!process.env.DATABASE_URL);
+console.log("JWT_SECRET exists?", !!process.env.JWT_SECRET);
 
 function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
@@ -41,12 +41,91 @@ function authenticateToken(req, res, next) {
   });
 }
 
-// --- ROTA DE CADASTRO  ---
+function authenticateService(req, res, next) {
+  const apiKey = req.headers["x-api-key"];
+
+  if (!apiKey || apiKey !== process.env.SERVICE_API_KEY) {
+    return res.status(403).json({ error: "Acesso negado (serviço)." });
+  }
+
+  next();
+}
+
+app.get("/paciente/me", authenticateToken, async (req, res) => {
+  const pacienteId = req.paciente.pacienteId;
+
+  const paciente = await prisma.paciente.findUnique({
+    where: { id: pacienteId },
+    select: {
+      id: true,
+      nomeCompleto: true,
+      nomeSocialApelido: true,
+      telefone: true,
+      sexo: true,
+      email: true,
+      cidade: true,
+      estado: true,
+      dataCadastro: true,
+    },
+  });
+
+  res.json(paciente);
+});
+
+app.put("/paciente/me", authenticateToken, async (req, res) => {
+  const pacienteId = req.paciente.pacienteId;
+
+  const dadosAtualizaveis = req.body;
+
+  const pacienteAtualizado = await prisma.paciente.update({
+    where: { id: pacienteId },
+    data: dadosAtualizaveis,
+  });
+
+  res.json(pacienteAtualizado);
+});
+
+app.get("/integrations/pacientes", authenticateService, async (req, res) => {
+  const pacientes = await prisma.paciente.findMany({
+    select: {
+      id: true,
+      nomeSocialApelido: true,
+      telefone: true,
+      sexo: true,
+      dataCadastro: true,
+    },
+  });
+
+  res.json(pacientes);
+});
+
+app.get(
+  "/integrations/pacientes/telefone/:telefone",
+  authenticateService,
+  async (req, res) => {
+    const { telefone } = req.params;
+
+    const paciente = await prisma.paciente.findUnique({
+      where: { telefone },
+      select: {
+        id: true,
+        nomeSocialApelido: true,
+        telefone: true,
+        sexo: true,
+        dataCadastro: true,
+      },
+    });
+
+    if (!paciente) {
+      return res.status(404).json({ error: "Paciente não encontrado." });
+    }
+
+    res.json(paciente);
+  },
+);
 
 app.post("/auth/register", async (req, res) => {
   const { nomeSocialApelido, telefone, sexo, senha } = req.body;
-
-  // Validação mínima
   if (!telefone || !senha || !nomeSocialApelido || !sexo) {
     return res.status(400).json({
       error: "Ooops... Todos os campos devem ser preenchidos.",
@@ -68,7 +147,6 @@ app.post("/auth/register", async (req, res) => {
         dataNascimento: null,
         alturaCm: null,
         email: null,
-
         cidade: null,
         estado: null,
         objetivoCorporalPrincipal: null,
@@ -104,8 +182,6 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
-// --- ROTA DE LOGIN - AGORA AUTENTICANDO COM TELEFONE ---
-
 app.post("/auth/login", async (req, res) => {
   console.log("Requisição de login recebida.");
   console.log("Corpo da requisição:", req.body);
@@ -136,11 +212,10 @@ app.post("/auth/login", async (req, res) => {
         .json({ error: "Credenciais inválidas. Senha incorreta." });
     }
 
-    // Cria o JWT usando o telefone como identificador único
     const token = jwt.sign(
       { pacienteId: paciente.id, telefone: paciente.telefone },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "7d" },
     );
 
     res.json({
@@ -157,8 +232,6 @@ app.post("/auth/login", async (req, res) => {
     res.status(500).json({ error: "Erro interno no servidor." });
   }
 });
-
-// --- ROTA DE ESTRUTURA (MANTIDA) ---
 
 app.get("/questionario/estrutura", authenticateToken, async (req, res) => {
   try {
@@ -180,13 +253,10 @@ app.get("/questionario/estrutura", authenticateToken, async (req, res) => {
   }
 });
 
-// --- ROTA DE STATUS (TRAVA MENSAL E RESULTADO) ---
-
 app.get("/questionario/status", authenticateToken, async (req, res) => {
   const pacienteId = req.paciente.pacienteId;
 
   try {
-    // Busca a submissão mais recente do paciente
     const ultimoQuestionario = await prisma.questionarioConcluido.findFirst({
       where: { pacienteId: pacienteId },
       orderBy: { dataConclusao: "desc" },
@@ -205,7 +275,6 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
     });
 
     if (!ultimoQuestionario) {
-      // Nunca respondeu, pode responder
       return res.json({ podeResponder: true, resultadoAnterior: null });
     }
 
@@ -216,7 +285,6 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
     const hoje = new Date();
     const podeResponder = hoje >= dataLimite;
 
-    // Formata o resultado para o frontend
     const resultadoAnteriorFormatado = {
       questionarioId: ultimoQuestionario.id,
       dataConclusao: ultimoQuestionario.dataConclusao,
@@ -229,7 +297,7 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
         pontuacaoObtida: p.pontuacaoObtida,
         pontuacaoMaxima: p.pilar.pontuacaoMaxima,
         percentualPilar: parseFloat(
-          ((p.pontuacaoObtida / p.pilar.pontuacaoMaxima) * 100).toFixed(2)
+          ((p.pontuacaoObtida / p.pilar.pontuacaoMaxima) * 100).toFixed(2),
         ),
       })),
     };
@@ -246,8 +314,6 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
   }
 });
 
-// --- ROTA DE SUBMISSÃO (COM TRAVA MENSAL) ---
-
 app.post("/questionario/submeter", authenticateToken, async (req, res) => {
   const pacienteId = req.paciente.pacienteId;
   const submissionData = req.body;
@@ -260,7 +326,6 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
   }
 
   try {
-    // --- Veficicação Mensal para o Trava ---
     const ultimoQuestionario = await prisma.questionarioConcluido.findFirst({
       where: { pacienteId: pacienteId },
       orderBy: { dataConclusao: "desc" },
@@ -274,9 +339,8 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
       const hoje = new Date();
 
       if (hoje < dataLimite) {
-        // Retorna um erro 409 (Conflict) se a trava estiver ativa
         const diasRestantes = Math.ceil(
-          (dataLimite.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)
+          (dataLimite.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24),
         );
 
         return res.status(409).json({
@@ -285,9 +349,7 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
         });
       }
     }
-    // --- Fim da Veficicação Mensal ---
 
-    // 1. Obter metadados necessários do DB (nome e pontuação máxima dos Pilares)
     const pilaresMeta = await prisma.pilar.findMany({
       select: { id: true, nomePilar: true, pontuacaoMaxima: true },
     });
@@ -297,7 +359,6 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
       return acc;
     }, {});
 
-    // 2. Mapear todas as perguntas para seus respectivos pilares (para a agregação)
     const perguntasMap = await prisma.pergunta
       .findMany({
         select: { id: true, pilarId: true },
@@ -306,21 +367,19 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
         perguntas.reduce((acc, p) => {
           acc[p.id] = p.pilarId;
           return acc;
-        }, {})
+        }, {}),
       );
 
     let pontuacaoTotal = 0;
     const resultadosPorPilar = {};
     let totalPerguntas = 0;
-
-    // 3. Calcular e agregar a pontuação com base nos dados fornecidos pelo FE
     for (const data of submissionData) {
       const { perguntaId, score, ehInvertida } = data;
       const pilarId = perguntasMap[perguntaId];
 
       if (!pilarId || !pilaresMap[pilarId]) {
         console.warn(
-          `Pilar ou Pergunta ID ${perguntaId} não encontrado no BD.`
+          `Pilar ou Pergunta ID ${perguntaId} não encontrado no BD.`,
         );
         continue;
       }
@@ -353,7 +412,6 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
         .json({ error: "Nenhuma resposta válida para cálculo encontrada." });
     }
 
-    // 4. Calcular métricas globais e definir classificação
     const pontuacaoMaximaGlobal = totalPerguntas * 3;
     const percentualGlobal = (pontuacaoTotal / pontuacaoMaximaGlobal) * 100;
 
@@ -364,7 +422,6 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
       classificacao = "EM EQUILÍBRIO";
     }
 
-    // 5. Salvar o QuestionarioConcluido no BD
     const novoQuestionario = await prisma.questionarioConcluido.create({
       data: {
         pacienteId: pacienteId,
@@ -376,7 +433,6 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
 
     const pontuacoesParaCriar = [];
 
-    // 6. Salvar o detalhe da Pontuação Por Pilar
     for (const pilarIdStr in resultadosPorPilar) {
       const pilarId = parseInt(pilarIdStr);
       const pontuacaoData = resultadosPorPilar[pilarId];
@@ -392,7 +448,6 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
       data: pontuacoesParaCriar,
     });
 
-    // 7. Retornar os resultados completos para o Frontend
     const resultadosFrontend = {
       questionarioId: novoQuestionario.id,
       dataConclusao: novoQuestionario.dataConclusao,
@@ -404,7 +459,7 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
         pontuacaoObtida: p.pontuacaoObtida,
         pontuacaoMaxima: p.pontuacaoMaximaPilar,
         percentualPilar: parseFloat(
-          ((p.pontuacaoObtida / p.pontuacaoMaximaPilar) * 100).toFixed(2)
+          ((p.pontuacaoObtida / p.pontuacaoMaximaPilar) * 100).toFixed(2),
         ),
       })),
     };
@@ -419,11 +474,8 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
   }
 });
 
-// --- ROTA DE ADMIN - LISTAR PACIENTES (TODOS OS NOVOS CAMPOS) ---
-
-app.get("/admin/pacientes", authenticateToken, async (req, res) => {
+app.get("/admin/pacientes", authenticateService, async (req, res) => {
   try {
-    // Busca todos os pacientes, incluindo os novos campos, excluindo a senha
     const pacientes = await prisma.paciente.findMany({
       select: {
         id: true,
@@ -460,20 +512,18 @@ app.get("/admin/pacientes", authenticateToken, async (req, res) => {
   }
 });
 
-// --- INÍCIO DO SERVIDOR ---
-
 async function startServer() {
   try {
     await prisma.$connect();
     console.log("✅ Conexão com o banco de dados estabelecida com sucesso.");
 
     app.listen(PORT, () => {
-      console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
+      console.log(`🚀 Servidor rodando na porta ${PORT}`);
     });
   } catch (e) {
     console.error(
       "❌ Falha ao iniciar o servidor ou conectar ao banco de dados:",
-      e
+      e,
     );
     process.exit(1);
   }
