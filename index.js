@@ -13,11 +13,8 @@ app.use(express.json());
 
 app.use(cors());
 app.get("/", (req, res) => {
-  res.send("API WHIM está rodando!");
+  res.send("API Irya está rodando!");
 });
-
-console.log("DATABASE_URL exists?", !!process.env.DATABASE_URL);
-console.log("JWT_SECRET exists?", !!process.env.JWT_SECRET);
 
 function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
@@ -184,7 +181,6 @@ app.post("/auth/register", async (req, res) => {
 
 app.post("/auth/login", async (req, res) => {
   console.log("Requisição de login recebida.");
-  console.log("Corpo da requisição:", req.body);
   const { telefone, senha } = req.body;
 
   if (!telefone || !senha) {
@@ -544,17 +540,16 @@ app.put(
         error: "Erro interno ao atualizar paciente.",
       });
     }
-  }
+  },
 );
-
 
 async function startServer() {
   try {
     await prisma.$connect();
-    console.log("✅ Conexão com o banco de dados estabelecida com sucesso.");
+    console.log("Conexão com o banco de dados estabelecida com sucesso.");
 
     app.listen(PORT, () => {
-      console.log(`🚀 Servidor rodando na porta ${PORT}`);
+      console.log(`Servidor rodando na porta ${PORT}`);
     });
   } catch (e) {
     console.error(

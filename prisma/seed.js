@@ -164,7 +164,6 @@ const questionarioData = [
 
 async function main() {
   console.log(`Iniciando a semeadura de dados...`);
-
   for (const pilarData of questionarioData) {
     const pilar = await prisma.pilar.create({
       data: {
