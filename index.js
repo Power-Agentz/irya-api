@@ -13,6 +13,7 @@ app.use(express.json());
 const defaultCorsOrigins = [
   "http://localhost:5173",
   "https://mev.clinicawhim.com.br",
+  "https://irya-web.vercel.app",
 ];
 
 const envCorsOrigins = (process.env.CORS_ORIGIN ?? "")
@@ -20,9 +21,9 @@ const envCorsOrigins = (process.env.CORS_ORIGIN ?? "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-const corsAllowList = [...new Set([...defaultCorsOrigins, ...envCorsOrigins])].map(
-  (origin) => origin.replace(/\/$/, ""),
-);
+const corsAllowList = [
+  ...new Set([...defaultCorsOrigins, ...envCorsOrigins]),
+].map((origin) => origin.replace(/\/$/, ""));
 
 const corsOptions = {
   origin(origin, callback) {
@@ -55,7 +56,9 @@ function authenticateToken(req, res, next) {
   const token = authHeader && authHeader.split(" ")[1];
 
   if (!token) {
-    return res.status(401).json({ error: "Acesso negado. Token não fornecido." });
+    return res
+      .status(401)
+      .json({ error: "Acesso negado. Token não fornecido." });
   }
 
   jwt.verify(token, process.env.JWT_SECRET, (err, paciente) => {
@@ -179,7 +182,9 @@ app.post("/auth/register", async (req, res) => {
     });
   } catch (e) {
     if (e.code === "P2002") {
-      return res.status(409).json({ error: "Este telefone já está cadastrado." });
+      return res
+        .status(409)
+        .json({ error: "Este telefone já está cadastrado." });
     }
 
     console.error("Erro no cadastro:", e);
@@ -211,7 +216,9 @@ app.post("/auth/login", async (req, res) => {
   const { telefone, senha } = req.body;
 
   if (!telefone || !senha) {
-    return res.status(400).json({ error: "Telefone e senha são obrigatórios." });
+    return res
+      .status(400)
+      .json({ error: "Telefone e senha são obrigatórios." });
   }
 
   try {
@@ -281,7 +288,9 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
     const pesoAtualKg = ultimosPesos[0]?.pesoKg ?? null;
     const variacaoPesoKg =
       ultimosPesos.length > 1
-        ? parseFloat((ultimosPesos[0].pesoKg - ultimosPesos[1].pesoKg).toFixed(2))
+        ? parseFloat(
+            (ultimosPesos[0].pesoKg - ultimosPesos[1].pesoKg).toFixed(2),
+          )
         : null;
 
     const ultimoQuestionario = await prisma.questionarioConcluido.findFirst({
@@ -342,7 +351,9 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
     });
   } catch (e) {
     console.error("Erro ao verificar status do questionário:", e);
-    res.status(500).json({ error: "Erro interno ao verificar o status da submissão." });
+    res
+      .status(500)
+      .json({ error: "Erro interno ao verificar o status da submissão." });
   }
 });
 
@@ -447,7 +458,9 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
     }
 
     if (totalPerguntas === 0) {
-      return res.status(400).json({ error: "Nenhuma resposta válida para cálculo encontrada." });
+      return res
+        .status(400)
+        .json({ error: "Nenhuma resposta válida para cálculo encontrada." });
     }
 
     const pontuacaoMaximaGlobal = totalPerguntas * 3;
@@ -591,7 +604,10 @@ async function startServer() {
       console.log(`Servidor rodando na porta ${PORT}`);
     });
   } catch (e) {
-    console.error("Falha ao iniciar o servidor ou conectar ao banco de dados:", e);
+    console.error(
+      "Falha ao iniciar o servidor ou conectar ao banco de dados:",
+      e,
+    );
     process.exit(1);
   }
 }
