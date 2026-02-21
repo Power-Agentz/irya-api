@@ -10,7 +10,30 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(express.json());
-app.use(cors());
+const corsAllowList = (process.env.CORS_ORIGIN ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (corsAllowList.length === 0 || corsAllowList.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Origin não permitida pelo CORS."));
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-API-KEY"],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 app.get("/", (req, res) => {
   res.send("API Irya está rodando!");
