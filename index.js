@@ -3,55 +3,48 @@ import express from "express";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import cors from "cors";
 
 const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(express.json());
-const corsAllowList = (process.env.CORS_ORIGIN ?? "")
+const defaultCorsOrigins = [
+  "http://localhost:5173",
+  "https://mev.clinicawhim.com.br",
+];
+
+const envCorsOrigins = (process.env.CORS_ORIGIN ?? "")
   .split(",")
-  .map((origin) => origin.trim().replace(/\/$/, ""))
+  .map((origin) => origin.trim())
   .filter(Boolean);
 
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
+const corsAllowList = [...new Set([...defaultCorsOrigins, ...envCorsOrigins])].map(
+  (origin) => origin.replace(/\/$/, ""),
+);
 
-  if (!origin) {
-    return next();
-  }
-
-  const normalizedOrigin = origin.replace(/\/$/, "");
-  const isAllowed =
-    corsAllowList.length === 0 || corsAllowList.includes(normalizedOrigin);
-
-  if (!isAllowed) {
-    if (req.method === "OPTIONS") {
-      return res.sendStatus(403);
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) {
+      return callback(null, true);
     }
-    return next();
-  }
 
-  res.setHeader("Access-Control-Allow-Origin", origin);
-  res.setHeader("Vary", "Origin");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-  );
+    const normalizedOrigin = origin.replace(/\/$/, "");
+    if (corsAllowList.includes(normalizedOrigin)) {
+      return callback(null, true);
+    }
 
-  const requestedHeaders = req.headers["access-control-request-headers"];
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    requestedHeaders || "Content-Type, Authorization, X-API-KEY",
-  );
+    return callback(null, false);
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-API-KEY"],
+  credentials: true,
+  optionsSuccessStatus: 204,
+};
 
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-
-  return next();
-});
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 app.get("/", (req, res) => {
   res.send("API Irya está rodando!");
