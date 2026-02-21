@@ -10,21 +10,18 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(express.json());
-
 app.use(cors());
+
 app.get("/", (req, res) => {
   res.send("API Irya está rodando!");
 });
 
 function authenticateToken(req, res, next) {
   const authHeader = req.headers["authorization"];
-
   const token = authHeader && authHeader.split(" ")[1];
 
-  if (token == null) {
-    return res
-      .status(401)
-      .json({ error: "Acesso negado. Token não fornecido." });
+  if (!token) {
+    return res.status(401).json({ error: "Acesso negado. Token não fornecido." });
   }
 
   jwt.verify(token, process.env.JWT_SECRET, (err, paciente) => {
@@ -33,7 +30,6 @@ function authenticateToken(req, res, next) {
     }
 
     req.paciente = paciente;
-
     next();
   });
 }
@@ -49,19 +45,13 @@ function authenticateService(req, res, next) {
 }
 
 app.get("/paciente/me", authenticateToken, async (req, res) => {
-  const pacienteId = req.paciente.pacienteId;
+  const pacienteTelefone = req.paciente.telefone;
 
   const paciente = await prisma.paciente.findUnique({
-    where: { id: pacienteId },
+    where: { telefone: pacienteTelefone },
     select: {
-      id: true,
-      nomeCompleto: true,
-      nomeSocialApelido: true,
       telefone: true,
-      sexo: true,
-      email: true,
-      cidade: true,
-      estado: true,
+      nomeCompleto: true,
       dataCadastro: true,
     },
   });
@@ -70,13 +60,21 @@ app.get("/paciente/me", authenticateToken, async (req, res) => {
 });
 
 app.put("/paciente/me", authenticateToken, async (req, res) => {
-  const pacienteId = req.paciente.pacienteId;
+  const pacienteTelefone = req.paciente.telefone;
+  const { nomeCompleto } = req.body;
 
-  const dadosAtualizaveis = req.body;
+  if (!nomeCompleto || typeof nomeCompleto !== "string") {
+    return res.status(400).json({ error: "Nome completo inválido." });
+  }
 
   const pacienteAtualizado = await prisma.paciente.update({
-    where: { id: pacienteId },
-    data: dadosAtualizaveis,
+    where: { telefone: pacienteTelefone },
+    data: { nomeCompleto },
+    select: {
+      telefone: true,
+      nomeCompleto: true,
+      dataCadastro: true,
+    },
   });
 
   res.json(pacienteAtualizado);
@@ -85,10 +83,8 @@ app.put("/paciente/me", authenticateToken, async (req, res) => {
 app.get("/integrations/pacientes", authenticateService, async (req, res) => {
   const pacientes = await prisma.paciente.findMany({
     select: {
-      id: true,
-      nomeSocialApelido: true,
       telefone: true,
-      sexo: true,
+      nomeCompleto: true,
       dataCadastro: true,
     },
   });
@@ -105,10 +101,8 @@ app.get(
     const paciente = await prisma.paciente.findUnique({
       where: { telefone },
       select: {
-        id: true,
-        nomeSocialApelido: true,
         telefone: true,
-        sexo: true,
+        nomeCompleto: true,
         dataCadastro: true,
       },
     });
@@ -122,10 +116,11 @@ app.get(
 );
 
 app.post("/auth/register", async (req, res) => {
-  const { nomeSocialApelido, telefone, sexo, senha } = req.body;
-  if (!telefone || !senha || !nomeSocialApelido || !sexo) {
+  const { nomeCompleto, telefone, senha } = req.body;
+
+  if (!telefone || !senha || !nomeCompleto) {
     return res.status(400).json({
-      error: "Ooops... Todos os campos devem ser preenchidos.",
+      error: "Ooops... Nome completo, telefone e senha são obrigatórios.",
     });
   }
 
@@ -136,42 +131,21 @@ app.post("/auth/register", async (req, res) => {
     const novaPaciente = await prisma.paciente.create({
       data: {
         telefone,
+        nomeCompleto,
         senhaHash,
-        nomeSocialApelido,
-        sexo,
-
-        nomeCompleto: null,
-        dataNascimento: null,
-        alturaCm: null,
-        email: null,
-        cidade: null,
-        estado: null,
-        objetivoCorporalPrincipal: null,
-        estadoCivil: null,
-        moraComAlguem: null,
-        temFilhos: null,
-        temPets: null,
-        profissao: null,
-        cargaHorariaTrabalho: null,
-        maiorDesafioHoje: null,
-        oQueEsperaConquistar: null,
-        informacoesGerais: null,
       },
     });
 
     res.status(201).json({
       message: "Cadastro realizado com sucesso!",
       paciente: {
-        id: novaPaciente.id,
         telefone: novaPaciente.telefone,
-        nomeSocialApelido: novaPaciente.nomeSocialApelido,
+        nomeCompleto: novaPaciente.nomeCompleto,
       },
     });
   } catch (e) {
-    if (e.code === "P2002" && e.meta?.target.includes("telefone")) {
-      return res
-        .status(409)
-        .json({ error: "Este Telefone/Whatsapp já está cadastrado." });
+    if (e.code === "P2002") {
+      return res.status(409).json({ error: "Este telefone já está cadastrado." });
     }
 
     console.error("Erro no cadastro:", e);
@@ -179,37 +153,48 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
-app.post("/auth/login", async (req, res) => {
-  console.log("Requisição de login recebida.");
-  const { telefone, senha } = req.body;
+app.get("/auth/telefone-disponivel/:telefone", async (req, res) => {
+  const { telefone } = req.params;
 
-  if (!telefone || !senha) {
-    return res
-      .status(400)
-      .json({ error: "Telefone e senha são obrigatórios." });
+  if (!telefone) {
+    return res.status(400).json({ error: "Telefone não informado." });
   }
 
   try {
     const paciente = await prisma.paciente.findUnique({
       where: { telefone },
+      select: { telefone: true },
     });
 
+    return res.json({ disponivel: !paciente });
+  } catch (e) {
+    console.error("Erro ao validar disponibilidade de telefone:", e);
+    return res.status(500).json({ error: "Erro ao validar telefone." });
+  }
+});
+
+app.post("/auth/login", async (req, res) => {
+  const { telefone, senha } = req.body;
+
+  if (!telefone || !senha) {
+    return res.status(400).json({ error: "Telefone e senha são obrigatórios." });
+  }
+
+  try {
+    const paciente = await prisma.paciente.findUnique({ where: { telefone } });
+
     if (!paciente) {
-      return res
-        .status(401)
-        .json({ error: "Credenciais inválidas. Telefone não encontrado." });
+      return res.status(401).json({ error: "Credenciais inválidas." });
     }
 
     const senhaValida = await bcrypt.compare(senha, paciente.senhaHash);
 
     if (!senhaValida) {
-      return res
-        .status(401)
-        .json({ error: "Credenciais inválidas. Senha incorreta." });
+      return res.status(401).json({ error: "Credenciais inválidas." });
     }
 
     const token = jwt.sign(
-      { pacienteId: paciente.id, telefone: paciente.telefone },
+      { telefone: paciente.telefone },
       process.env.JWT_SECRET,
       { expiresIn: "7d" },
     );
@@ -218,9 +203,9 @@ app.post("/auth/login", async (req, res) => {
       message: "Login bem-sucedido!",
       token,
       paciente: {
-        id: paciente.id,
-        nome: paciente.nomeSocialApelido,
         telefone: paciente.telefone,
+        nomeCompleto: paciente.nomeCompleto,
+        nome: paciente.nomeCompleto,
       },
     });
   } catch (e) {
@@ -250,11 +235,11 @@ app.get("/questionario/estrutura", authenticateToken, async (req, res) => {
 });
 
 app.get("/questionario/status", authenticateToken, async (req, res) => {
-  const pacienteId = req.paciente.pacienteId;
+  const pacienteTelefone = req.paciente.telefone;
 
   try {
     const ultimoQuestionario = await prisma.questionarioConcluido.findFirst({
-      where: { pacienteId: pacienteId },
+      where: { pacienteTelefone },
       orderBy: { dataConclusao: "desc" },
       include: {
         pontuacoes: {
@@ -287,7 +272,7 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
       pontuacaoTotal: ultimoQuestionario.pontuacaoTotal,
       percentualGlobal: ultimoQuestionario.percentualGlobal,
       classificacao: ultimoQuestionario.classificacao,
-      dataLimite: dataLimite, // Envia a data limite para o frontend calcular os dias
+      dataLimite,
       detalhesPilares: ultimoQuestionario.pontuacoes.map((p) => ({
         nome: p.pilar.nomePilar,
         pontuacaoObtida: p.pontuacaoObtida,
@@ -299,19 +284,17 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
     };
 
     res.json({
-      podeResponder: podeResponder,
+      podeResponder,
       resultadoAnterior: resultadoAnteriorFormatado,
     });
   } catch (e) {
     console.error("Erro ao verificar status do questionário:", e);
-    res
-      .status(500)
-      .json({ error: "Erro interno ao verificar o status da submissão." });
+    res.status(500).json({ error: "Erro interno ao verificar o status da submissão." });
   }
 });
 
 app.post("/questionario/submeter", authenticateToken, async (req, res) => {
-  const pacienteId = req.paciente.pacienteId;
+  const pacienteTelefone = req.paciente.telefone;
   const submissionData = req.body;
 
   if (!Array.isArray(submissionData) || submissionData.length === 0) {
@@ -323,7 +306,7 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
 
   try {
     const ultimoQuestionario = await prisma.questionarioConcluido.findFirst({
-      where: { pacienteId: pacienteId },
+      where: { pacienteTelefone },
       orderBy: { dataConclusao: "desc" },
     });
 
@@ -341,7 +324,7 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
 
         return res.status(409).json({
           error: `Você já enviou um questionário recentemente. Aguarde ${diasRestantes} dias para enviar novamente.`,
-          diasRestantes: diasRestantes,
+          diasRestantes,
         });
       }
     }
@@ -369,14 +352,12 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
     let pontuacaoTotal = 0;
     const resultadosPorPilar = {};
     let totalPerguntas = 0;
+
     for (const data of submissionData) {
       const { perguntaId, score, ehInvertida } = data;
       const pilarId = perguntasMap[perguntaId];
 
       if (!pilarId || !pilaresMap[pilarId]) {
-        console.warn(
-          `Pilar ou Pergunta ID ${perguntaId} não encontrado no BD.`,
-        );
         continue;
       }
 
@@ -403,9 +384,7 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
     }
 
     if (totalPerguntas === 0) {
-      return res
-        .status(400)
-        .json({ error: "Nenhuma resposta válida para cálculo encontrada." });
+      return res.status(400).json({ error: "Nenhuma resposta válida para cálculo encontrada." });
     }
 
     const pontuacaoMaximaGlobal = totalPerguntas * 3;
@@ -420,22 +399,22 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
 
     const novoQuestionario = await prisma.questionarioConcluido.create({
       data: {
-        pacienteId: pacienteId,
-        pontuacaoTotal: pontuacaoTotal,
+        pacienteTelefone,
+        pontuacaoTotal,
         percentualGlobal: parseFloat(percentualGlobal.toFixed(2)),
-        classificacao: classificacao,
+        classificacao,
       },
     });
 
     const pontuacoesParaCriar = [];
 
     for (const pilarIdStr in resultadosPorPilar) {
-      const pilarId = parseInt(pilarIdStr);
+      const pilarId = parseInt(pilarIdStr, 10);
       const pontuacaoData = resultadosPorPilar[pilarId];
 
       pontuacoesParaCriar.push({
         questionarioConcluidoId: novoQuestionario.id,
-        pilarId: pilarId,
+        pilarId,
         pontuacaoObtida: pontuacaoData.pontuacaoObtida,
       });
     }
@@ -474,26 +453,8 @@ app.get("/admin/pacientes", authenticateService, async (req, res) => {
   try {
     const pacientes = await prisma.paciente.findMany({
       select: {
-        id: true,
-        nomeCompleto: true,
-        nomeSocialApelido: true,
         telefone: true,
-        email: true,
-        dataNascimento: true,
-        sexo: true,
-        alturaCm: true,
-        cidade: true,
-        estado: true,
-        objetivoCorporalPrincipal: true,
-        estadoCivil: true,
-        moraComAlguem: true,
-        temFilhos: true,
-        temPets: true,
-        profissao: true,
-        cargaHorariaTrabalho: true,
-        maiorDesafioHoje: true,
-        oQueEsperaConquistar: true,
-        informacoesGerais: true,
+        nomeCompleto: true,
         dataCadastro: true,
       },
       orderBy: { dataCadastro: "desc" },
@@ -507,25 +468,29 @@ app.get("/admin/pacientes", authenticateService, async (req, res) => {
     });
   }
 });
+
 app.put(
   "/integrations/pacientes/telefone/:telefone",
   authenticateService,
   async (req, res) => {
     const { telefone } = req.params;
-    const dadosAtualizaveis = req.body;
+    const { nomeCompleto } = req.body;
+
+    if (!nomeCompleto || typeof nomeCompleto !== "string") {
+      return res.status(400).json({ error: "Nome completo inválido." });
+    }
 
     try {
       const paciente = await prisma.paciente.update({
         where: { telefone },
-        data: dadosAtualizaveis,
+        data: { nomeCompleto },
       });
 
       res.json({
         message: "Paciente atualizado com sucesso.",
         paciente: {
-          id: paciente.id,
           telefone: paciente.telefone,
-          nomeSocialApelido: paciente.nomeSocialApelido,
+          nomeCompleto: paciente.nomeCompleto,
         },
       });
     } catch (e) {
@@ -552,10 +517,7 @@ async function startServer() {
       console.log(`Servidor rodando na porta ${PORT}`);
     });
   } catch (e) {
-    console.error(
-      "❌ Falha ao iniciar o servidor ou conectar ao banco de dados:",
-      e,
-    );
+    console.error("Falha ao iniciar o servidor ou conectar ao banco de dados:", e);
     process.exit(1);
   }
 }
