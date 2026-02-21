@@ -14,6 +14,9 @@ app.use(express.json());
 const defaultCorsOrigins = [
   "http://localhost:5173",
   "https://mev.clinicawhim.com.br",
+  "https://www.mev.clinicawhim.com.br",
+  "https://irya-web.vercel.app/",
+  "https://www.irya-web.vercel.app/"
 ];
 
 const envCorsOrigins = (process.env.CORS_ORIGIN ?? "")
@@ -38,7 +41,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
 
 app.get("/", (req, res) => {
   res.send("API Irya está rodando!");
