@@ -238,6 +238,18 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
   const pacienteTelefone = req.paciente.telefone;
 
   try {
+    const ultimosPesos = await prisma.historicoPeso.findMany({
+      where: { pacienteTelefone },
+      orderBy: { dataRegistro: "desc" },
+      take: 2,
+    });
+
+    const pesoAtualKg = ultimosPesos[0]?.pesoKg ?? null;
+    const variacaoPesoKg =
+      ultimosPesos.length > 1
+        ? parseFloat((ultimosPesos[0].pesoKg - ultimosPesos[1].pesoKg).toFixed(2))
+        : null;
+
     const ultimoQuestionario = await prisma.questionarioConcluido.findFirst({
       where: { pacienteTelefone },
       orderBy: { dataConclusao: "desc" },
@@ -256,7 +268,12 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
     });
 
     if (!ultimoQuestionario) {
-      return res.json({ podeResponder: true, resultadoAnterior: null });
+      return res.json({
+        podeResponder: true,
+        resultadoAnterior: null,
+        pesoAtualKg,
+        variacaoPesoKg,
+      });
     }
 
     const dataUltimaResposta = ultimoQuestionario.dataConclusao;
@@ -286,6 +303,8 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
     res.json({
       podeResponder,
       resultadoAnterior: resultadoAnteriorFormatado,
+      pesoAtualKg,
+      variacaoPesoKg,
     });
   } catch (e) {
     console.error("Erro ao verificar status do questionário:", e);
@@ -295,12 +314,22 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
 
 app.post("/questionario/submeter", authenticateToken, async (req, res) => {
   const pacienteTelefone = req.paciente.telefone;
-  const submissionData = req.body;
+  const payload = req.body;
+  const submissionData = Array.isArray(payload) ? payload : payload?.respostas;
+  const pesoAtualKgRaw = Array.isArray(payload) ? null : payload?.pesoAtualKg;
+
+  const pesoAtualKg = Number(pesoAtualKgRaw);
 
   if (!Array.isArray(submissionData) || submissionData.length === 0) {
     return res.status(400).json({
       error:
         "Dados de submissão inválidos ou ausentes. Esperado um array de respostas.",
+    });
+  }
+
+  if (!Number.isFinite(pesoAtualKg) || pesoAtualKg <= 0) {
+    return res.status(400).json({
+      error: "Informe um peso atual válido em quilogramas.",
     });
   }
 
@@ -397,30 +426,41 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
       classificacao = "EM EQUILÍBRIO";
     }
 
-    const novoQuestionario = await prisma.questionarioConcluido.create({
-      data: {
-        pacienteTelefone,
-        pontuacaoTotal,
-        percentualGlobal: parseFloat(percentualGlobal.toFixed(2)),
-        classificacao,
-      },
-    });
-
-    const pontuacoesParaCriar = [];
-
-    for (const pilarIdStr in resultadosPorPilar) {
-      const pilarId = parseInt(pilarIdStr, 10);
-      const pontuacaoData = resultadosPorPilar[pilarId];
-
-      pontuacoesParaCriar.push({
-        questionarioConcluidoId: novoQuestionario.id,
-        pilarId,
-        pontuacaoObtida: pontuacaoData.pontuacaoObtida,
+    const novoQuestionario = await prisma.$transaction(async (tx) => {
+      const questionario = await tx.questionarioConcluido.create({
+        data: {
+          pacienteTelefone,
+          pontuacaoTotal,
+          percentualGlobal: parseFloat(percentualGlobal.toFixed(2)),
+          classificacao,
+        },
       });
-    }
 
-    await prisma.pontuacaoPorPilar.createMany({
-      data: pontuacoesParaCriar,
+      const pontuacoesParaCriar = [];
+
+      for (const pilarIdStr in resultadosPorPilar) {
+        const pilarId = parseInt(pilarIdStr, 10);
+        const pontuacaoData = resultadosPorPilar[pilarId];
+
+        pontuacoesParaCriar.push({
+          questionarioConcluidoId: questionario.id,
+          pilarId,
+          pontuacaoObtida: pontuacaoData.pontuacaoObtida,
+        });
+      }
+
+      await tx.pontuacaoPorPilar.createMany({
+        data: pontuacoesParaCriar,
+      });
+
+      await tx.historicoPeso.create({
+        data: {
+          pacienteTelefone,
+          pesoKg: parseFloat(pesoAtualKg.toFixed(2)),
+        },
+      });
+
+      return questionario;
     });
 
     const resultadosFrontend = {
