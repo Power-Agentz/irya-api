@@ -9,9 +9,36 @@ const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.register(cors, {
-  origin: ["http://localhost:5173", "https://irya-web.vercel.app"],
-});
+app.use(express.json());
+
+const defaultCorsOrigins = [
+  "http://localhost:5173",
+  "https://mev.clinicawhim.com.br",
+];
+
+const envCorsOrigins = (process.env.CORS_ORIGIN ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const corsAllowList = [...new Set([...defaultCorsOrigins, ...envCorsOrigins])].map(
+  (origin) => origin.replace(/\/$/, ""),
+);
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    const normalizedOrigin = origin.replace(/\/$/, "");
+    return callback(null, corsAllowList.includes(normalizedOrigin));
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-API-KEY"],
+  credentials: true,
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 app.get("/", (req, res) => {
   res.send("API Irya está rodando!");
