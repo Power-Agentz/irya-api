@@ -4,6 +4,18 @@ export const createPacienteRepository = (prisma) => {
       where: { telefone },
     });
 
+  const findProfileByTelefone = (telefone) =>
+    prisma.paciente.findUnique({
+      where: { telefone },
+      select: {
+        telefone: true,
+        nomeCompleto: true,
+        isSubscriber: true,
+        subscriptionStartedAt: true,
+        subscriptionCanceledAt: true,
+      },
+    });
+
   const findByTelefoneWithApiKey = (telefone) =>
     prisma.paciente.findUnique({
       where: { telefone },
@@ -30,8 +42,8 @@ export const createPacienteRepository = (prisma) => {
 
   return {
     findByTelefone,
+    findProfileByTelefone,
     findByTelefoneWithApiKey,
     updateSubscriptionByTelefone,
   };
 };
-

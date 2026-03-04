@@ -50,12 +50,22 @@ const corsOptions = {
     return callback(null, corsAllowList.includes(normalizedOrigin));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-API-KEY", "X-ADMIN-KEY"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "Accept",
+    "Origin",
+    "X-API-KEY",
+    "X-ADMIN-KEY",
+  ],
   credentials: true,
   optionsSuccessStatus: 204,
+  maxAge: 86400,
 };
 
 app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
 app.get("/", (req, res) => {
   res.send("API Irya está rodando!");
@@ -128,6 +138,9 @@ app.get("/paciente/me", authenticateToken, async (req, res) => {
       telefone: true,
       nomeCompleto: true,
       dataCadastro: true,
+      isSubscriber: true,
+      subscriptionStartedAt: true,
+      subscriptionCanceledAt: true,
     },
   });
 
@@ -287,6 +300,9 @@ app.post("/auth/login", async (req, res) => {
         telefone: paciente.telefone,
         nomeCompleto: paciente.nomeCompleto,
         nome: paciente.nomeCompleto,
+        isSubscriber: paciente.isSubscriber,
+        subscriptionStartedAt: paciente.subscriptionStartedAt,
+        subscriptionCanceledAt: paciente.subscriptionCanceledAt,
       },
     });
   } catch (e) {
@@ -669,6 +685,41 @@ app.post("/webhooks/asaas", async (req, res) => {
   } catch (e) {
     console.error("Erro ao processar webhook Asaas:", e);
     return res.status(500).json({ error: "Erro interno ao processar webhook." });
+  }
+});
+
+app.get("/subscription/status", authenticateToken, async (req, res) => {
+  const phone = req.paciente?.telefone;
+
+  try {
+    const payload = await subscriptionService.getSubscriptionStatus(phone);
+    if (!payload) {
+      return res.status(404).json({ error: "Paciente não encontrado." });
+    }
+    return res.json(payload);
+  } catch (e) {
+    console.error("Erro ao buscar status de assinatura:", e);
+    return res
+      .status(500)
+      .json({ error: "Não foi possível consultar a assinatura." });
+  }
+});
+
+app.post("/subscription/checkout", authenticateToken, async (req, res) => {
+  const phone = req.paciente?.telefone;
+
+  try {
+    const result = await subscriptionService.createMonthlyCheckout(phone);
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    return res.status(result.status).json(result.data);
+  } catch (e) {
+    console.error("Erro ao criar checkout de assinatura:", e);
+    return res
+      .status(500)
+      .json({ error: "Não foi possível iniciar o pagamento da assinatura." });
   }
 });
 
