@@ -732,6 +732,25 @@ app.get("/admin/pacientes/:phone", authenticateAdmin, async (req, res) => {
   }
 });
 
+app.delete("/admin/pacientes/:phone", authenticateAdmin, async (req, res) => {
+  const { phone } = req.params;
+
+  try {
+    const deleted = await adminService.deletePaciente(phone);
+    if (!deleted) {
+      return res.status(404).json({ error: "Paciente não encontrado." });
+    }
+
+    return res.json({
+      message: "Cadastro excluído com sucesso.",
+      telefone: phone,
+    });
+  } catch (e) {
+    console.error("Erro ao excluir paciente:", e);
+    return res.status(500).json({ error: "Não foi possível excluir o cadastro." });
+  }
+});
+
 app.put(
   "/integrations/pacientes/telefone/:telefone",
   authenticateService,

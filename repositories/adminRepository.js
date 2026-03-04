@@ -112,12 +112,56 @@ export const createAdminRepository = (prisma) => {
       },
     });
 
+  const deletePacienteByPhone = async (phone) => {
+    const paciente = await prisma.paciente.findUnique({
+      where: { telefone: phone },
+      select: { telefone: true },
+    });
+
+    if (!paciente) return null;
+
+    await prisma.$transaction(async (tx) => {
+      const questionarios = await tx.questionarioConcluido.findMany({
+        where: { pacienteTelefone: phone },
+        select: { id: true },
+      });
+
+      const questionarioIds = questionarios.map((q) => q.id);
+
+      if (questionarioIds.length > 0) {
+        await tx.pontuacaoPorPilar.deleteMany({
+          where: {
+            questionarioConcluidoId: { in: questionarioIds },
+          },
+        });
+      }
+
+      await tx.answer.deleteMany({
+        where: { pacienteTelefone: phone },
+      });
+
+      await tx.questionarioConcluido.deleteMany({
+        where: { pacienteTelefone: phone },
+      });
+
+      await tx.historicoPeso.deleteMany({
+        where: { pacienteTelefone: phone },
+      });
+
+      await tx.paciente.delete({
+        where: { telefone: phone },
+      });
+    });
+
+    return { telefone: phone };
+  };
+
   return {
     getOverview,
     listPacientes,
     listQuestionariosConcluidos,
     listPontuacoes,
     getPacienteDetalhes,
+    deletePacienteByPhone,
   };
 };
-

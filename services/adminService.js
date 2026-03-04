@@ -45,6 +45,7 @@ export const createAdminService = ({ adminRepository }) => {
   };
 
   const getPacienteDetalhes = (phone) => adminRepository.getPacienteDetalhes(phone);
+  const deletePaciente = (phone) => adminRepository.deletePacienteByPhone(phone);
 
   return {
     getOverview,
@@ -52,6 +53,6 @@ export const createAdminService = ({ adminRepository }) => {
     getQuestionariosConcluidos,
     getPontuacoes,
     getPacienteDetalhes,
+    deletePaciente,
   };
 };
-
