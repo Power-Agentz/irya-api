@@ -12,9 +12,14 @@ model Paciente {
   nomeCompleto            String
   senhaHash               String
   dataCadastro            DateTime               @default(now())
+  isSubscriber            Boolean                @default(false) @map("is_subscriber")
+  subscriptionStartedAt   DateTime?              @map("subscription_started_at")
+  subscriptionCanceledAt  DateTime?              @map("subscription_canceled_at")
+  apiKey                  String?                @unique @map("api_key")
 
   historicoPesos          HistoricoPeso[]
   questionariosConcluidos QuestionarioConcluido[]
+  answers                 Answer[]
 
   @@map("pacientes")
 }
@@ -64,6 +69,7 @@ model QuestionarioConcluido {
 
   paciente         Paciente            @relation(fields: [pacienteTelefone], references: [telefone])
   pontuacoes       PontuacaoPorPilar[]
+  answers          Answer[]
 
   @@unique([pacienteTelefone, dataConclusao], name: "unique_monthly_submission")
   @@map("questionarios_concluidos")
@@ -79,4 +85,21 @@ model PontuacaoPorPilar {
   pilar                   Pilar                  @relation(fields: [pilarId], references: [id])
 
   @@map("pontuacoes_por_pilar")
+}
+
+model Answer {
+  id                      Int                    @id @default(autoincrement())
+  pacienteTelefone        String                 @map("patient_id")
+  questionarioConcluidoId Int?                   @map("questionario_concluido_id")
+  questionText            String                 @map("question_text")
+  answerValue             Int                    @map("answer_value")
+  pilarCategory           String                 @map("pilar_category")
+  createdAt               DateTime               @default(now()) @map("created_at")
+
+  paciente                Paciente               @relation(fields: [pacienteTelefone], references: [telefone])
+  questionarioConcluido   QuestionarioConcluido? @relation(fields: [questionarioConcluidoId], references: [id])
+
+  @@index([pacienteTelefone, createdAt], map: "answers_patient_id_created_at_idx")
+  @@index([pilarCategory], map: "answers_pilar_category_idx")
+  @@map("answers")
 }

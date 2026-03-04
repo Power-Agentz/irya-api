@@ -4,10 +4,23 @@ import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cors from "cors";
+import { randomUUID } from "crypto";
+import { createPacienteRepository } from "./repositories/pacienteRepository.js";
+import { createBotRepository } from "./repositories/botRepository.js";
+import { createBotService } from "./services/botService.js";
+import { createSubscriptionService } from "./services/subscriptionService.js";
+import { createAdminRepository } from "./repositories/adminRepository.js";
+import { createAdminService } from "./services/adminService.js";
 
 const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 3001;
+const pacienteRepository = createPacienteRepository(prisma);
+const botRepository = createBotRepository(prisma);
+const botService = createBotService({ pacienteRepository, botRepository });
+const subscriptionService = createSubscriptionService({ pacienteRepository });
+const adminRepository = createAdminRepository(prisma);
+const adminService = createAdminService({ adminRepository });
 
 app.use(express.json());
 
@@ -16,7 +29,9 @@ const defaultCorsOrigins = [
   "https://mev.clinicawhim.com.br",
   "https://www.mev.clinicawhim.com.br",
   "https://irya-web.vercel.app/",
-  "https://www.irya-web.vercel.app/"
+  "https://www.irya-web.vercel.app/",
+  "https://portalirya.clinicawhim.com.br/"
+
 ];
 
 const envCorsOrigins = (process.env.CORS_ORIGIN ?? "")
@@ -35,7 +50,7 @@ const corsOptions = {
     return callback(null, corsAllowList.includes(normalizedOrigin));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-API-KEY"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-API-KEY", "X-ADMIN-KEY"],
   credentials: true,
   optionsSuccessStatus: 204,
 };
@@ -73,6 +88,34 @@ function authenticateService(req, res, next) {
     return res.status(403).json({ error: "Acesso negado (serviço)." });
   }
 
+  next();
+}
+
+function authenticateAdmin(req, res, next) {
+  const providedKey = req.headers["x-admin-key"] ?? req.headers["x-api-key"];
+  const expectedKey = process.env.ADMIN_ACCESS_KEY ?? process.env.SERVICE_API_KEY;
+
+  if (!providedKey || !expectedKey || providedKey !== expectedKey) {
+    return res.status(403).json({ error: "Acesso negado (admin)." });
+  }
+
+  next();
+}
+
+async function authenticateBotApiKey(req, res, next) {
+  const apiKey = req.headers["x-api-key"];
+  const phone = req.params.phone;
+
+  if (!phone) {
+    return res.status(400).json({ error: "Telefone não informado na rota." });
+  }
+
+  const validation = await botService.validateBotApiKey(phone, apiKey);
+  if (!validation.ok) {
+    return res.status(validation.status).json({ error: validation.error });
+  }
+
+  req.botPatient = validation.patient;
   next();
 }
 
@@ -165,6 +208,8 @@ app.post("/auth/register", async (req, res) => {
         telefone,
         nomeCompleto,
         senhaHash,
+        apiKey: randomUUID(),
+        isSubscriber: false,
       },
     });
 
@@ -409,22 +454,27 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
 
     const perguntasMap = await prisma.pergunta
       .findMany({
-        select: { id: true, pilarId: true },
+        select: { id: true, pilarId: true, textoPergunta: true },
       })
       .then((perguntas) =>
         perguntas.reduce((acc, p) => {
-          acc[p.id] = p.pilarId;
+          acc[p.id] = {
+            pilarId: p.pilarId,
+            textoPergunta: p.textoPergunta,
+          };
           return acc;
         }, {}),
       );
 
     let pontuacaoTotal = 0;
     const resultadosPorPilar = {};
+    const answersToSave = [];
     let totalPerguntas = 0;
 
     for (const data of submissionData) {
       const { perguntaId, score, ehInvertida } = data;
-      const pilarId = perguntasMap[perguntaId];
+      const perguntaInfo = perguntasMap[perguntaId];
+      const pilarId = perguntaInfo?.pilarId;
 
       if (!pilarId || !pilaresMap[pilarId]) {
         continue;
@@ -450,6 +500,13 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
       }
 
       resultadosPorPilar[pilarId].pontuacaoObtida += pontuacaoFinal;
+
+      answersToSave.push({
+        pacienteTelefone,
+        questionText: perguntaInfo.textoPergunta,
+        answerValue: score,
+        pilarCategory: pilarInfo.nomePilar,
+      });
     }
 
     if (totalPerguntas === 0) {
@@ -495,6 +552,15 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
         data: pontuacoesParaCriar,
       });
 
+      if (answersToSave.length > 0) {
+        await tx.answer.createMany({
+          data: answersToSave.map((answer) => ({
+            ...answer,
+            questionarioConcluidoId: questionario.id,
+          })),
+        });
+      }
+
       await tx.historicoPeso.create({
         data: {
           pacienteTelefone,
@@ -531,16 +597,94 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
   }
 });
 
-app.get("/admin/pacientes", authenticateService, async (req, res) => {
+app.get("/api/bot/scores/:phone", authenticateBotApiKey, async (req, res) => {
+  const { phone } = req.params;
+
   try {
-    const pacientes = await prisma.paciente.findMany({
-      select: {
-        telefone: true,
-        nomeCompleto: true,
-        dataCadastro: true,
-      },
-      orderBy: { dataCadastro: "desc" },
-    });
+    const payload = await botService.getScoresByPhone(phone);
+    return res.json(payload);
+  } catch (e) {
+    console.error("Erro ao buscar pontuações para bot:", e);
+    return res.status(500).json({ error: "Erro interno ao buscar pontuações." });
+  }
+});
+
+app.get("/api/bot/answers/:phone", authenticateBotApiKey, async (req, res) => {
+  const { phone } = req.params;
+
+  try {
+    const payload = await botService.getAnswersByPhone(phone);
+    return res.json(payload);
+  } catch (e) {
+    console.error("Erro ao buscar respostas para bot:", e);
+    return res.status(500).json({ error: "Erro interno ao buscar respostas." });
+  }
+});
+
+app.get(
+  "/api/bot/answers/:phone/pilar/:pilar_name",
+  authenticateBotApiKey,
+  async (req, res) => {
+    const { phone, pilar_name: pilarName } = req.params;
+
+    try {
+      const payload = await botService.getAnswersByPhoneAndPilar(phone, pilarName);
+      return res.json(payload);
+    } catch (e) {
+      console.error("Erro ao buscar respostas por pilar para bot:", e);
+      return res
+        .status(500)
+        .json({ error: "Erro interno ao buscar respostas por pilar." });
+    }
+  },
+);
+
+app.get(
+  "/api/bot/subscription-status/:phone",
+  authenticateBotApiKey,
+  async (req, res) => {
+    const { phone } = req.params;
+
+    try {
+      const payload = await botService.getSubscriptionStatusByPhone(phone);
+      if (!payload) {
+        return res.status(404).json({ error: "Paciente não encontrado." });
+      }
+      return res.json(payload);
+    } catch (e) {
+      console.error("Erro ao buscar status de assinatura para bot:", e);
+      return res
+        .status(500)
+        .json({ error: "Erro interno ao buscar status de assinatura." });
+    }
+  },
+);
+
+app.post("/webhooks/asaas", async (req, res) => {
+  try {
+    const result = await subscriptionService.syncSubscriptionFromAsaasWebhook(
+      req.body,
+    );
+    return res.status(200).json(result);
+  } catch (e) {
+    console.error("Erro ao processar webhook Asaas:", e);
+    return res.status(500).json({ error: "Erro interno ao processar webhook." });
+  }
+});
+
+app.get("/admin/overview", authenticateAdmin, async (req, res) => {
+  try {
+    const overview = await adminService.getOverview();
+    return res.json(overview);
+  } catch (e) {
+    console.error("Erro ao buscar overview admin:", e);
+    return res.status(500).json({ error: "Não foi possível carregar o overview." });
+  }
+});
+
+app.get("/admin/pacientes", authenticateAdmin, async (req, res) => {
+  try {
+    const pacientes = await adminService.getPacientes();
 
     res.json(pacientes);
   } catch (e) {
@@ -548,6 +692,43 @@ app.get("/admin/pacientes", authenticateService, async (req, res) => {
     res.status(500).json({
       error: "Não foi possível carregar a lista de pacientes.",
     });
+  }
+});
+
+app.get("/admin/questionarios-concluidos", authenticateAdmin, async (req, res) => {
+  try {
+    const questionarios = await adminService.getQuestionariosConcluidos();
+    return res.json(questionarios);
+  } catch (e) {
+    console.error("Erro ao buscar questionários concluídos:", e);
+    return res.status(500).json({
+      error: "Não foi possível carregar os questionários concluídos.",
+    });
+  }
+});
+
+app.get("/admin/pontuacoes", authenticateAdmin, async (req, res) => {
+  try {
+    const pontuacoes = await adminService.getPontuacoes();
+    return res.json(pontuacoes);
+  } catch (e) {
+    console.error("Erro ao buscar pontuações admin:", e);
+    return res.status(500).json({ error: "Não foi possível carregar pontuações." });
+  }
+});
+
+app.get("/admin/pacientes/:phone", authenticateAdmin, async (req, res) => {
+  const { phone } = req.params;
+
+  try {
+    const paciente = await adminService.getPacienteDetalhes(phone);
+    if (!paciente) {
+      return res.status(404).json({ error: "Paciente não encontrado." });
+    }
+    return res.json(paciente);
+  } catch (e) {
+    console.error("Erro ao buscar detalhes do paciente:", e);
+    return res.status(500).json({ error: "Não foi possível carregar os detalhes." });
   }
 });
 
