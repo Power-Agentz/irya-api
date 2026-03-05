@@ -67,9 +67,13 @@ const createAsaasClient = () => {
     const data = raw ? JSON.parse(raw) : null;
 
     if (!response.ok) {
-      throw new Error(
-        `Erro Asaas (${response.status}): ${data?.errors?.[0]?.description ?? response.statusText}`,
+      const firstError = data?.errors?.[0];
+      const asaasError = new Error(
+        `Erro Asaas (${response.status}): ${firstError?.description ?? response.statusText}`,
       );
+      asaasError.statusCode = response.status;
+      asaasError.details = data;
+      throw asaasError;
     }
 
     return data;
@@ -194,55 +198,68 @@ export const createSubscriptionService = ({ pacienteRepository }) => {
       };
     }
 
-    const asaas = createAsaasClient();
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + 1);
+    try {
+      const asaas = createAsaasClient();
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 1);
 
-    const customer = await ensureCustomer({
-      phone: normalizedPhone,
-      nomeCompleto: profile.nomeCompleto,
-    });
+      const customer = await ensureCustomer({
+        phone: normalizedPhone,
+        nomeCompleto: profile.nomeCompleto,
+      });
 
-    const subscription = await asaas.request("/v3/subscriptions", {
-      method: "POST",
-      body: JSON.stringify({
-        customer: customer.id,
-        billingType: asaas.config.billingType,
-        value: asaas.config.monthlyValue,
-        nextDueDate: toIsoDate(dueDate),
-        cycle: "MONTHLY",
-        description: asaas.config.description,
-        externalReference: normalizedPhone,
-      }),
-    });
+      const subscription = await asaas.request("/v3/subscriptions", {
+        method: "POST",
+        body: JSON.stringify({
+          customer: customer.id,
+          billingType: asaas.config.billingType,
+          value: asaas.config.monthlyValue,
+          nextDueDate: toIsoDate(dueDate),
+          cycle: "MONTHLY",
+          description: asaas.config.description,
+          externalReference: normalizedPhone,
+        }),
+      });
 
-    const firstPayment = await getFirstSubscriptionPayment(subscription.id);
-    const checkoutUrl = getCheckoutUrlFromPayment(firstPayment);
+      const firstPayment = await getFirstSubscriptionPayment(subscription.id);
+      const checkoutUrl = getCheckoutUrlFromPayment(firstPayment);
 
-    const now = new Date();
-    const updated = await pacienteRepository.updateSubscriptionByTelefone(
-      normalizedPhone,
-      {
-        isSubscriber: true,
-        subscriptionStartedAt: profile.subscriptionStartedAt ?? now,
-        subscriptionCanceledAt: null,
-      },
-    );
+      const now = new Date();
+      const updated = await pacienteRepository.updateSubscriptionByTelefone(
+        normalizedPhone,
+        {
+          isSubscriber: true,
+          subscriptionStartedAt: profile.subscriptionStartedAt ?? now,
+          subscriptionCanceledAt: null,
+        },
+      );
 
-    return {
-      ok: true,
-      status: 201,
-      data: {
-        message: "Assinatura mensal criada com sucesso.",
-        checkoutUrl,
-        customerId: customer.id,
-        subscriptionId: subscription.id,
-        billingType: asaas.config.billingType,
-        value: asaas.config.monthlyValue,
-        nextDueDate: toIsoDate(dueDate),
-        subscription: updated,
-      },
-    };
+      return {
+        ok: true,
+        status: 201,
+        data: {
+          message: "Assinatura mensal criada com sucesso.",
+          checkoutUrl,
+          customerId: customer.id,
+          subscriptionId: subscription.id,
+          billingType: asaas.config.billingType,
+          value: asaas.config.monthlyValue,
+          nextDueDate: toIsoDate(dueDate),
+          subscription: updated,
+        },
+      };
+    } catch (error) {
+      const message = error?.message ?? "Erro ao integrar com Asaas.";
+      const details = error?.details ?? null;
+      const statusCode = error?.statusCode ?? 502;
+
+      return {
+        ok: false,
+        status: statusCode >= 400 && statusCode < 600 ? statusCode : 502,
+        error: message,
+        details,
+      };
+    }
   };
 
   return {

@@ -711,7 +711,10 @@ app.post("/subscription/checkout", authenticateToken, async (req, res) => {
   try {
     const result = await subscriptionService.createMonthlyCheckout(phone);
     if (!result.ok) {
-      return res.status(result.status).json({ error: result.error });
+      return res.status(result.status).json({
+        error: result.error,
+        details: result.details ?? null,
+      });
     }
 
     return res.status(result.status).json(result.data);
