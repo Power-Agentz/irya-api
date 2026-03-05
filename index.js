@@ -707,9 +707,10 @@ app.get("/subscription/status", authenticateToken, async (req, res) => {
 
 app.post("/subscription/checkout", authenticateToken, async (req, res) => {
   const phone = req.paciente?.telefone;
+  const { cpfCnpj } = req.body ?? {};
 
   try {
-    const result = await subscriptionService.createMonthlyCheckout(phone);
+    const result = await subscriptionService.createMonthlyCheckout(phone, cpfCnpj);
     if (!result.ok) {
       return res.status(result.status).json({
         error: result.error,

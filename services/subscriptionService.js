@@ -150,8 +150,9 @@ export const createSubscriptionService = ({ pacienteRepository }) => {
     };
   };
 
-  const ensureCustomer = async ({ phone, nomeCompleto }) => {
+  const ensureCustomer = async ({ phone, nomeCompleto, cpfCnpj }) => {
     const { request } = createAsaasClient();
+    const normalizedCpfCnpj = normalizeDigitsOnly(cpfCnpj);
 
     const existing = await request(
       `/v3/customers?externalReference=${encodeURIComponent(phone)}&limit=1&offset=0`,
@@ -159,7 +160,20 @@ export const createSubscriptionService = ({ pacienteRepository }) => {
     );
 
     if (existing?.data?.length > 0) {
-      return existing.data[0];
+      const customer = existing.data[0];
+
+      if (normalizedCpfCnpj && customer.cpfCnpj !== normalizedCpfCnpj) {
+        return request(`/v3/customers/${customer.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            name: nomeCompleto,
+            mobilePhone: phone,
+            cpfCnpj: normalizedCpfCnpj,
+          }),
+        });
+      }
+
+      return customer;
     }
 
     return request("/v3/customers", {
@@ -168,6 +182,7 @@ export const createSubscriptionService = ({ pacienteRepository }) => {
         name: nomeCompleto,
         mobilePhone: phone,
         externalReference: phone,
+        cpfCnpj: normalizedCpfCnpj,
       }),
     });
   };
@@ -182,8 +197,9 @@ export const createSubscriptionService = ({ pacienteRepository }) => {
     return payments?.data?.[0] ?? null;
   };
 
-  const createMonthlyCheckout = async (phone) => {
+  const createMonthlyCheckout = async (phone, cpfCnpj) => {
     const normalizedPhone = normalizeDigitsOnly(phone);
+    const normalizedCpfCnpj = normalizeDigitsOnly(cpfCnpj);
     const profile = await pacienteRepository.findByTelefone(normalizedPhone);
 
     if (!profile) {
@@ -198,6 +214,14 @@ export const createSubscriptionService = ({ pacienteRepository }) => {
       };
     }
 
+    if (!normalizedCpfCnpj || (normalizedCpfCnpj.length !== 11 && normalizedCpfCnpj.length !== 14)) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Informe um CPF ou CNPJ válido para continuar.",
+      };
+    }
+
     try {
       const asaas = createAsaasClient();
       const dueDate = new Date();
@@ -206,6 +230,7 @@ export const createSubscriptionService = ({ pacienteRepository }) => {
       const customer = await ensureCustomer({
         phone: normalizedPhone,
         nomeCompleto: profile.nomeCompleto,
+        cpfCnpj: normalizedCpfCnpj,
       });
 
       const subscription = await asaas.request("/v3/subscriptions", {
