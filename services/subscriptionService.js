@@ -38,7 +38,7 @@ const getAsaasConfig = () => {
   return {
     baseUrl,
     apiKey: process.env.ASAAS_API_KEY ?? "",
-    monthlyValue: Number(process.env.ASAAS_MONTHLY_VALUE ?? "79.9"),
+    monthlyValue: Number(process.env.ASAAS_MONTHLY_VALUE ?? "49.0"),
     billingType: process.env.ASAAS_BILLING_TYPE ?? "UNDEFINED",
     description:
       process.env.ASAAS_SUBSCRIPTION_DESCRIPTION ?? "Assinatura mensal Portal Irya",
