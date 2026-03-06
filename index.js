@@ -727,6 +727,27 @@ app.post("/subscription/checkout", authenticateToken, async (req, res) => {
   }
 });
 
+app.post("/subscription/cancel", authenticateToken, async (req, res) => {
+  const phone = req.paciente?.telefone;
+
+  try {
+    const result = await subscriptionService.cancelMonthlySubscription(phone);
+    if (!result.ok) {
+      return res.status(result.status).json({
+        error: result.error,
+        details: result.details ?? null,
+      });
+    }
+
+    return res.status(result.status).json(result.data);
+  } catch (e) {
+    console.error("Erro ao cancelar assinatura:", e);
+    return res
+      .status(500)
+      .json({ error: "Não foi possível cancelar a assinatura." });
+  }
+});
+
 app.get("/admin/overview", authenticateAdmin, async (req, res) => {
   try {
     const overview = await adminService.getOverview();

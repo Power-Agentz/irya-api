@@ -39,7 +39,7 @@ const getAsaasConfig = () => {
     baseUrl,
     apiKey: process.env.ASAAS_API_KEY ?? "",
     monthlyValue: Number(process.env.ASAAS_MONTHLY_VALUE ?? "49.0"),
-    billingType: process.env.ASAAS_BILLING_TYPE ?? "UNDEFINED",
+    billingType: process.env.ASAAS_BILLING_TYPE ?? "CREDIT_CARD",
     description:
       process.env.ASAAS_SUBSCRIPTION_DESCRIPTION ?? "Assinatura mensal Portal Irya",
   };
@@ -88,6 +88,13 @@ const getCheckoutUrlFromPayment = (payment) =>
   payment?.checkoutUrl ??
   payment?.pixQrCodeUrl ??
   null;
+
+const CANCELLABLE_SUBSCRIPTION_STATUS = new Set([
+  "ACTIVE",
+  "OVERDUE",
+  "PENDING",
+  "AWAITING_RISK_ANALYSIS",
+]);
 
 export const createSubscriptionService = ({ pacienteRepository }) => {
   const syncSubscriptionFromAsaasWebhook = async (payload) => {
@@ -287,9 +294,78 @@ export const createSubscriptionService = ({ pacienteRepository }) => {
     }
   };
 
+  const findLatestCancellableSubscriptionByPhone = async (phone) => {
+    const { request } = createAsaasClient();
+    const subscriptions = await request(
+      `/v3/subscriptions?externalReference=${encodeURIComponent(phone)}&limit=20&offset=0`,
+      { method: "GET" },
+    );
+
+    const data = Array.isArray(subscriptions?.data) ? subscriptions.data : [];
+    return (
+      data.find((subscription) =>
+        CANCELLABLE_SUBSCRIPTION_STATUS.has(String(subscription?.status ?? "").toUpperCase()),
+      ) ?? null
+    );
+  };
+
+  const cancelMonthlySubscription = async (phone) => {
+    const normalizedPhone = normalizeDigitsOnly(phone);
+    const profile = await pacienteRepository.findByTelefone(normalizedPhone);
+
+    if (!profile) {
+      return { ok: false, status: 404, error: "Paciente nao encontrado." };
+    }
+
+    if (!profile.isSubscriber) {
+      return {
+        ok: false,
+        status: 409,
+        error: "Não existe assinatura ativa para cancelar.",
+      };
+    }
+
+    try {
+      const asaas = createAsaasClient();
+      const currentSubscription = await findLatestCancellableSubscriptionByPhone(normalizedPhone);
+
+      if (currentSubscription?.id) {
+        await asaas.request(`/v3/subscriptions/${currentSubscription.id}`, {
+          method: "DELETE",
+        });
+      }
+
+      const updated = await pacienteRepository.updateSubscriptionByTelefone(normalizedPhone, {
+        isSubscriber: false,
+        subscriptionCanceledAt: new Date(),
+      });
+
+      return {
+        ok: true,
+        status: 200,
+        data: {
+          message: "Assinatura cancelada com sucesso.",
+          subscription: updated,
+        },
+      };
+    } catch (error) {
+      const message = error?.message ?? "Erro ao integrar com Asaas.";
+      const details = error?.details ?? null;
+      const statusCode = error?.statusCode ?? 502;
+
+      return {
+        ok: false,
+        status: statusCode >= 400 && statusCode < 600 ? statusCode : 502,
+        error: message,
+        details,
+      };
+    }
+  };
+
   return {
     syncSubscriptionFromAsaasWebhook,
     getSubscriptionStatus,
     createMonthlyCheckout,
+    cancelMonthlySubscription,
   };
 };
