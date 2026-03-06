@@ -23,6 +23,7 @@ export const createAdminRepository = (prisma) => {
         telefone: true,
         nomeCompleto: true,
         dataCadastro: true,
+        alturaM: true,
         isSubscriber: true,
         subscriptionStartedAt: true,
         subscriptionCanceledAt: true,

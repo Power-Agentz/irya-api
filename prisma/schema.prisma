@@ -12,6 +12,7 @@ model Paciente {
   nomeCompleto            String
   senhaHash               String
   dataCadastro            DateTime               @default(now())
+  alturaM                 Float?                 @map("altura_m")
   isSubscriber            Boolean                @default(false) @map("is_subscriber")
   subscriptionStartedAt   DateTime?              @map("subscription_started_at")
   subscriptionCanceledAt  DateTime?              @map("subscription_canceled_at")
@@ -28,6 +29,7 @@ model HistoricoPeso {
   id               Int      @id @default(autoincrement())
   pacienteTelefone String   @map("paciente_telefone")
   pesoKg           Float
+  imc              Float?
   dataRegistro     DateTime @default(now())
 
   paciente         Paciente @relation(fields: [pacienteTelefone], references: [telefone])

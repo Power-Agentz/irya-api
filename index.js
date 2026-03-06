@@ -138,6 +138,7 @@ app.get("/paciente/me", authenticateToken, async (req, res) => {
       telefone: true,
       nomeCompleto: true,
       dataCadastro: true,
+      alturaM: true,
       isSubscriber: true,
       subscriptionStartedAt: true,
       subscriptionCanceledAt: true,
@@ -335,13 +336,29 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
   const pacienteTelefone = req.paciente.telefone;
 
   try {
-    const ultimosPesos = await prisma.historicoPeso.findMany({
-      where: { pacienteTelefone },
-      orderBy: { dataRegistro: "desc" },
-      take: 2,
-    });
+    const [pacientePerfil, ultimosPesos] = await Promise.all([
+      prisma.paciente.findUnique({
+        where: { telefone: pacienteTelefone },
+        select: { alturaM: true },
+      }),
+      prisma.historicoPeso.findMany({
+        where: { pacienteTelefone },
+        orderBy: { dataRegistro: "desc" },
+        take: 2,
+      }),
+    ]);
+
+    if (!pacientePerfil) {
+      return res.status(404).json({ error: "Paciente não encontrado." });
+    }
 
     const pesoAtualKg = ultimosPesos[0]?.pesoKg ?? null;
+    const alturaM = pacientePerfil.alturaM ?? null;
+    const imcAtual =
+      ultimosPesos[0]?.imc ??
+      (pesoAtualKg !== null && alturaM !== null
+        ? parseFloat((pesoAtualKg / (alturaM * alturaM)).toFixed(2))
+        : null);
     const variacaoPesoKg =
       ultimosPesos.length > 1
         ? parseFloat(
@@ -372,6 +389,8 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
         resultadoAnterior: null,
         pesoAtualKg,
         variacaoPesoKg,
+        alturaM,
+        imcAtual,
       });
     }
 
@@ -389,6 +408,8 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
       percentualGlobal: ultimoQuestionario.percentualGlobal,
       classificacao: ultimoQuestionario.classificacao,
       dataLimite,
+      alturaM,
+      imcAtual,
       detalhesPilares: ultimoQuestionario.pontuacoes.map((p) => ({
         nome: p.pilar.nomePilar,
         pontuacaoObtida: p.pontuacaoObtida,
@@ -404,6 +425,8 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
       resultadoAnterior: resultadoAnteriorFormatado,
       pesoAtualKg,
       variacaoPesoKg,
+      alturaM,
+      imcAtual,
     });
   } catch (e) {
     console.error("Erro ao verificar status do questionário:", e);
@@ -418,8 +441,14 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
   const payload = req.body;
   const submissionData = Array.isArray(payload) ? payload : payload?.respostas;
   const pesoAtualKgRaw = Array.isArray(payload) ? null : payload?.pesoAtualKg;
+  const alturaMRaw = Array.isArray(payload) ? null : payload?.alturaM;
 
   const pesoAtualKg = Number(pesoAtualKgRaw);
+  const alturaMInformada = Number(
+    String(alturaMRaw ?? "")
+      .replace(",", ".")
+      .trim(),
+  );
 
   if (!Array.isArray(submissionData) || submissionData.length === 0) {
     return res.status(400).json({
@@ -435,10 +464,35 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
   }
 
   try {
-    const ultimoQuestionario = await prisma.questionarioConcluido.findFirst({
-      where: { pacienteTelefone },
-      orderBy: { dataConclusao: "desc" },
-    });
+    const [pacientePerfil, ultimoQuestionario] = await Promise.all([
+      prisma.paciente.findUnique({
+        where: { telefone: pacienteTelefone },
+        select: { alturaM: true },
+      }),
+      prisma.questionarioConcluido.findFirst({
+        where: { pacienteTelefone },
+        orderBy: { dataConclusao: "desc" },
+      }),
+    ]);
+
+    if (!pacientePerfil) {
+      return res.status(404).json({ error: "Paciente não encontrado." });
+    }
+
+    const alturaMParaCalculo =
+      pacientePerfil.alturaM !== null && pacientePerfil.alturaM !== undefined
+        ? pacientePerfil.alturaM
+        : alturaMInformada;
+
+    if (
+      !Number.isFinite(alturaMParaCalculo) ||
+      alturaMParaCalculo < 0.8 ||
+      alturaMParaCalculo > 2.5
+    ) {
+      return res.status(400).json({
+        error: "Informe uma altura válida no formato 0,00m (ex.: 1,65m).",
+      });
+    }
 
     if (ultimoQuestionario) {
       const dataUltimaResposta = ultimoQuestionario.dataConclusao;
@@ -577,22 +631,42 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
         });
       }
 
+      if (pacientePerfil.alturaM === null || pacientePerfil.alturaM === undefined) {
+        await tx.paciente.update({
+          where: { telefone: pacienteTelefone },
+          data: {
+            alturaM: parseFloat(alturaMParaCalculo.toFixed(2)),
+          },
+        });
+      }
+
+      const imcAtual = parseFloat(
+        (pesoAtualKg / (alturaMParaCalculo * alturaMParaCalculo)).toFixed(2),
+      );
+
       await tx.historicoPeso.create({
         data: {
           pacienteTelefone,
           pesoKg: parseFloat(pesoAtualKg.toFixed(2)),
+          imc: imcAtual,
         },
       });
 
-      return questionario;
+      return {
+        questionario,
+        imcAtual,
+        alturaM: parseFloat(alturaMParaCalculo.toFixed(2)),
+      };
     });
 
     const resultadosFrontend = {
-      questionarioId: novoQuestionario.id,
-      dataConclusao: novoQuestionario.dataConclusao,
+      questionarioId: novoQuestionario.questionario.id,
+      dataConclusao: novoQuestionario.questionario.dataConclusao,
       pontuacaoTotal,
       percentualGlobal: parseFloat(percentualGlobal.toFixed(2)),
       classificacao,
+      alturaM: novoQuestionario.alturaM,
+      imcAtual: novoQuestionario.imcAtual,
       detalhesPilares: Object.values(resultadosPorPilar).map((p) => ({
         nome: p.nome,
         pontuacaoObtida: p.pontuacaoObtida,
