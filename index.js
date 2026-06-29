@@ -47,8 +47,8 @@ const defaultCorsOrigins = [
   "https://www.mev.clinicawhim.com.br",
   "https://irya-web.vercel.app/",
   "https://www.irya-web.vercel.app/",
-  "https://portalirya.clinicawhim.com.br/"
-
+  "https://portalirya.clinicawhim.com.br/",
+  "https://minhairya.clinicawhim.com.br"
 ];
 
 const envCorsOrigins = (process.env.CORS_ORIGIN ?? "")
