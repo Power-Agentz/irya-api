@@ -1,32 +1,36 @@
 export const createAdminRepository = (prisma) => {
   const getOverview = async () => {
-    const [totalPacientes, totalQuestionarios, totalRespostas, totalAssinantesAtivos] =
+    const [totalPacientes, totalQuestionarios, totalRespostas, assinaturasAtivas] =
       await Promise.all([
         prisma.paciente.count(),
         prisma.questionarioConcluido.count(),
         prisma.answer.count(),
-        prisma.paciente.count({ where: { isSubscriber: true } }),
+        prisma.assinatura.findMany({
+          where: {
+            tipoPlano: { not: "gratuito" },
+            statusPagamento: { notIn: ["cancelado", "reembolsado"] },
+          },
+          distinct: ["pacienteId"],
+          select: { pacienteId: true },
+        }),
       ]);
 
     return {
       totalPacientes,
       totalQuestionarios,
       totalRespostas,
-      totalAssinantesAtivos,
+      totalAssinantesAtivos: assinaturasAtivas.length,
     };
   };
 
   const listPacientes = () =>
     prisma.paciente.findMany({
-      orderBy: { dataCadastro: "desc" },
-      select: {
-        telefone: true,
-        nomeCompleto: true,
-        dataCadastro: true,
-        alturaM: true,
-        isSubscriber: true,
-        subscriptionStartedAt: true,
-        subscriptionCanceledAt: true,
+      orderBy: [{ dataCadastro: "desc" }, { dataCriacao: "desc" }],
+      include: {
+        assinaturas: {
+          orderBy: [{ atualizadoEm: "desc" }, { criadoEm: "desc" }],
+          take: 1,
+        },
         _count: {
           select: {
             questionariosConcluidos: true,
@@ -45,6 +49,7 @@ export const createAdminRepository = (prisma) => {
           select: {
             telefone: true,
             nomeCompleto: true,
+            nome: true,
           },
         },
         pontuacoes: {
@@ -63,7 +68,7 @@ export const createAdminRepository = (prisma) => {
 
   const listPontuacoes = () =>
     prisma.pontuacaoPorPilar.findMany({
-      orderBy: { id: "desc" },
+      orderBy: { criadoEm: "desc" },
       include: {
         pilar: {
           select: {
@@ -86,6 +91,9 @@ export const createAdminRepository = (prisma) => {
     prisma.paciente.findUnique({
       where: { telefone: phone },
       include: {
+        assinaturas: {
+          orderBy: [{ atualizadoEm: "desc" }, { criadoEm: "desc" }],
+        },
         historicoPesos: {
           orderBy: { dataRegistro: "desc" },
           take: 24,
@@ -116,7 +124,7 @@ export const createAdminRepository = (prisma) => {
   const deletePacienteByPhone = async (phone) => {
     const paciente = await prisma.paciente.findUnique({
       where: { telefone: phone },
-      select: { telefone: true },
+      select: { id: true, telefone: true },
     });
 
     if (!paciente) return null;
@@ -127,7 +135,11 @@ export const createAdminRepository = (prisma) => {
         select: { id: true },
       });
 
-      const questionarioIds = questionarios.map((q) => q.id);
+      const questionarioIds = questionarios.map((questionario) => questionario.id);
+
+      await tx.answer.deleteMany({
+        where: { pacienteTelefone: phone },
+      });
 
       if (questionarioIds.length > 0) {
         await tx.pontuacaoPorPilar.deleteMany({
@@ -137,10 +149,6 @@ export const createAdminRepository = (prisma) => {
         });
       }
 
-      await tx.answer.deleteMany({
-        where: { pacienteTelefone: phone },
-      });
-
       await tx.questionarioConcluido.deleteMany({
         where: { pacienteTelefone: phone },
       });
@@ -149,8 +157,16 @@ export const createAdminRepository = (prisma) => {
         where: { pacienteTelefone: phone },
       });
 
+      await tx.assinatura.deleteMany({
+        where: { pacienteTelefone: phone },
+      });
+
+      await tx.dadosMev.deleteMany({
+        where: { pacienteTelefone: phone },
+      });
+
       await tx.paciente.delete({
-        where: { telefone: phone },
+        where: { id: paciente.id },
       });
     });
 

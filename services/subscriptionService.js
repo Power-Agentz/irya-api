@@ -122,7 +122,8 @@ export const createSubscriptionService = ({ pacienteRepository }) => {
         {
           isSubscriber: true,
           subscriptionStartedAt: patient.subscriptionStartedAt ?? now,
-          subscriptionCanceledAt: null,
+          statusPagamento: "ativo",
+          tipoPlano: "premium",
         },
       );
 
@@ -134,7 +135,7 @@ export const createSubscriptionService = ({ pacienteRepository }) => {
         normalizedPhone,
         {
           isSubscriber: false,
-          subscriptionCanceledAt: new Date(),
+          statusPagamento: "cancelado",
         },
       );
 
@@ -262,7 +263,11 @@ export const createSubscriptionService = ({ pacienteRepository }) => {
         {
           isSubscriber: true,
           subscriptionStartedAt: profile.subscriptionStartedAt ?? now,
-          subscriptionCanceledAt: null,
+          statusPagamento: "ativo",
+          tipoPlano: "premium",
+          asaasCustomerId: customer.id,
+          asaasSubscriptionId: subscription.id,
+          fimPeriodoAtual: firstPayment?.dueDate ? new Date(firstPayment.dueDate) : null,
         },
       );
 
@@ -337,7 +342,7 @@ export const createSubscriptionService = ({ pacienteRepository }) => {
 
       const updated = await pacienteRepository.updateSubscriptionByTelefone(normalizedPhone, {
         isSubscriber: false,
-        subscriptionCanceledAt: new Date(),
+        statusPagamento: "cancelado",
       });
 
       return {

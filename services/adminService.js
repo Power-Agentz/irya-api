@@ -1,10 +1,12 @@
+import { mapPacienteToPortalPayload } from "../utils/patientMappers.js";
+
 export const createAdminService = ({ adminRepository }) => {
   const getOverview = () => adminRepository.getOverview();
 
   const getPacientes = async () => {
     const pacientes = await adminRepository.listPacientes();
     return pacientes.map((paciente) => ({
-      ...paciente,
+      ...mapPacienteToPortalPayload(paciente),
       metricas: {
         questionariosConcluidos: paciente._count.questionariosConcluidos,
         respostasRegistradas: paciente._count.answers,
@@ -19,7 +21,7 @@ export const createAdminService = ({ adminRepository }) => {
       id: row.id,
       dataConclusao: row.dataConclusao,
       pacienteTelefone: row.pacienteTelefone,
-      pacienteNome: row.paciente?.nomeCompleto ?? null,
+      pacienteNome: row.paciente?.nomeCompleto ?? row.paciente?.nome ?? null,
       pontuacaoTotal: row.pontuacaoTotal,
       percentualGlobal: row.percentualGlobal,
       classificacao: row.classificacao,
@@ -44,7 +46,18 @@ export const createAdminService = ({ adminRepository }) => {
     }));
   };
 
-  const getPacienteDetalhes = (phone) => adminRepository.getPacienteDetalhes(phone);
+  const getPacienteDetalhes = async (phone) => {
+    const paciente = await adminRepository.getPacienteDetalhes(phone);
+    if (!paciente) return null;
+
+    return {
+      ...mapPacienteToPortalPayload(paciente),
+      assinaturas: paciente.assinaturas,
+      historicoPesos: paciente.historicoPesos,
+      questionariosConcluidos: paciente.questionariosConcluidos,
+      answers: paciente.answers,
+    };
+  };
   const deletePaciente = (phone) => adminRepository.deletePacienteByPhone(phone);
 
   return {

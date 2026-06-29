@@ -1,49 +1,143 @@
+import {
+  deriveSubscriptionSnapshot,
+  mapPacienteToPortalPayload,
+} from "../utils/patientMappers.js";
+
+const patientInclude = {
+  assinaturas: {
+    orderBy: [{ atualizadoEm: "desc" }, { criadoEm: "desc" }],
+    take: 1,
+  },
+};
+
 export const createPacienteRepository = (prisma) => {
-  const findByTelefone = (telefone) =>
+  const findRawByTelefone = (telefone) =>
     prisma.paciente.findUnique({
       where: { telefone },
+      include: patientInclude,
     });
 
-  const findProfileByTelefone = (telefone) =>
-    prisma.paciente.findUnique({
-      where: { telefone },
-      select: {
-        telefone: true,
-        nomeCompleto: true,
-        isSubscriber: true,
-        subscriptionStartedAt: true,
-        subscriptionCanceledAt: true,
+  const findByTelefone = async (telefone) => {
+    const paciente = await findRawByTelefone(telefone);
+    return mapPacienteToPortalPayload(paciente);
+  };
+
+  const findProfileByTelefone = async (telefone) => {
+    const paciente = await findRawByTelefone(telefone);
+    return mapPacienteToPortalPayload(paciente);
+  };
+
+  const findByTelefoneWithApiKey = async (telefone) => {
+    const paciente = await findRawByTelefone(telefone);
+    return mapPacienteToPortalPayload(paciente);
+  };
+
+  const createByTelefone = async ({ telefone, nomeCompleto, senhaHash, apiKey }) => {
+    const paciente = await prisma.paciente.create({
+      data: {
+        telefone,
+        nomeCompleto,
+        nome: nomeCompleto,
+        senhaHash,
+        apiKey,
       },
+      include: patientInclude,
     });
 
-  const findByTelefoneWithApiKey = (telefone) =>
-    prisma.paciente.findUnique({
-      where: { telefone },
-      select: {
-        telefone: true,
-        apiKey: true,
-        isSubscriber: true,
-        subscriptionStartedAt: true,
-        subscriptionCanceledAt: true,
-      },
-    });
+    return mapPacienteToPortalPayload(paciente);
+  };
 
-  const updateSubscriptionByTelefone = (telefone, data) =>
-    prisma.paciente.update({
+  const updateProfileByTelefone = async (telefone, data) => {
+    const paciente = await prisma.paciente.update({
       where: { telefone },
       data,
-      select: {
-        telefone: true,
-        isSubscriber: true,
-        subscriptionStartedAt: true,
-        subscriptionCanceledAt: true,
-      },
+      include: patientInclude,
     });
 
+    return mapPacienteToPortalPayload(paciente);
+  };
+
+  const updateSubscriptionByTelefone = async (telefone, data) => {
+    const paciente = await prisma.paciente.findUnique({
+      where: { telefone },
+      include: patientInclude,
+    });
+
+    if (!paciente) return null;
+
+    const subscription = paciente.assinaturas?.[0] ?? null;
+    const nextTipoPlano =
+      data.tipoPlano ??
+      (data.isSubscriber === true
+        ? "premium"
+        : data.isSubscriber === false
+          ? subscription?.tipoPlano ?? "premium"
+          : subscription?.tipoPlano ?? "gratuito");
+
+    const nextStatusPagamento =
+      data.statusPagamento ??
+      (data.isSubscriber === true
+        ? "ativo"
+        : data.isSubscriber === false
+          ? "cancelado"
+          : subscription?.statusPagamento ?? "ativo");
+
+    const payload = {
+      pacienteTelefone: telefone,
+      pacienteId: paciente.id,
+      tipoPlano: nextTipoPlano,
+      statusPagamento: nextStatusPagamento,
+      dataConversao:
+        data.subscriptionStartedAt ??
+        data.dataConversao ??
+        subscription?.dataConversao ??
+        null,
+      fimPeriodoAtual: data.fimPeriodoAtual ?? subscription?.fimPeriodoAtual ?? null,
+      atualizadoEm: new Date(),
+      asaasSubscriptionId:
+        data.asaasSubscriptionId ?? subscription?.asaasSubscriptionId ?? null,
+      asaasCustomerId: data.asaasCustomerId ?? subscription?.asaasCustomerId ?? null,
+    };
+
+    if (!subscription) {
+      await prisma.assinatura.create({
+        data: {
+          ...payload,
+          criadoEm: new Date(),
+          inicioTesteEm: new Date(),
+        },
+      });
+    } else {
+      await prisma.assinatura.update({
+        where: { id: subscription.id },
+        data: payload,
+      });
+    }
+
+    const updated = await findRawByTelefone(telefone);
+    return mapPacienteToPortalPayload(updated);
+  };
+
+  const getSubscriptionEntityByTelefone = async (telefone) => {
+    const paciente = await findRawByTelefone(telefone);
+    if (!paciente) return null;
+
+    const subscriptionEntity = paciente.assinaturas?.[0] ?? null;
+    return {
+      paciente,
+      subscription: subscriptionEntity,
+      snapshot: deriveSubscriptionSnapshot(subscriptionEntity),
+    };
+  };
+
   return {
+    findRawByTelefone,
     findByTelefone,
     findProfileByTelefone,
     findByTelefoneWithApiKey,
+    createByTelefone,
+    updateProfileByTelefone,
     updateSubscriptionByTelefone,
+    getSubscriptionEntityByTelefone,
   };
 };

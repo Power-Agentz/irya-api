@@ -5,14 +5,25 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import cors from "cors";
 import { randomUUID } from "crypto";
+import { pathToFileURL } from "url";
 import { createPacienteRepository } from "./repositories/pacienteRepository.js";
 import { createBotRepository } from "./repositories/botRepository.js";
 import { createBotService } from "./services/botService.js";
 import { createSubscriptionService } from "./services/subscriptionService.js";
 import { createAdminRepository } from "./repositories/adminRepository.js";
 import { createAdminService } from "./services/adminService.js";
+import {
+  mapPacienteToPortalPayload,
+  normalizeDigitsOnly,
+} from "./utils/patientMappers.js";
 
-const prisma = new PrismaClient();
+const globalForPrisma = globalThis;
+const prisma = globalForPrisma.prisma ?? new PrismaClient();
+
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma;
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 const pacienteRepository = createPacienteRepository(prisma);
@@ -21,6 +32,12 @@ const botService = createBotService({ pacienteRepository, botRepository });
 const subscriptionService = createSubscriptionService({ pacienteRepository });
 const adminRepository = createAdminRepository(prisma);
 const adminService = createAdminService({ adminRepository });
+const latestSubscriptionInclude = {
+  assinaturas: {
+    orderBy: [{ atualizadoEm: "desc" }, { criadoEm: "desc" }],
+    take: 1,
+  },
+};
 
 app.use(express.json());
 
@@ -134,18 +151,10 @@ app.get("/paciente/me", authenticateToken, async (req, res) => {
 
   const paciente = await prisma.paciente.findUnique({
     where: { telefone: pacienteTelefone },
-    select: {
-      telefone: true,
-      nomeCompleto: true,
-      dataCadastro: true,
-      alturaM: true,
-      isSubscriber: true,
-      subscriptionStartedAt: true,
-      subscriptionCanceledAt: true,
-    },
+    include: latestSubscriptionInclude,
   });
 
-  res.json(paciente);
+  res.json(mapPacienteToPortalPayload(paciente));
 });
 
 app.put("/paciente/me", authenticateToken, async (req, res) => {
@@ -156,29 +165,20 @@ app.put("/paciente/me", authenticateToken, async (req, res) => {
     return res.status(400).json({ error: "Nome completo inválido." });
   }
 
-  const pacienteAtualizado = await prisma.paciente.update({
-    where: { telefone: pacienteTelefone },
-    data: { nomeCompleto },
-    select: {
-      telefone: true,
-      nomeCompleto: true,
-      dataCadastro: true,
-    },
-  });
+  const pacienteAtualizado = await pacienteRepository.updateProfileByTelefone(
+    pacienteTelefone,
+    { nomeCompleto, nome: nomeCompleto },
+  );
 
   res.json(pacienteAtualizado);
 });
 
 app.get("/integrations/pacientes", authenticateService, async (req, res) => {
   const pacientes = await prisma.paciente.findMany({
-    select: {
-      telefone: true,
-      nomeCompleto: true,
-      dataCadastro: true,
-    },
+    include: latestSubscriptionInclude,
   });
 
-  res.json(pacientes);
+  res.json(pacientes.map(mapPacienteToPortalPayload));
 });
 
 app.get(
@@ -189,23 +189,21 @@ app.get(
 
     const paciente = await prisma.paciente.findUnique({
       where: { telefone },
-      select: {
-        telefone: true,
-        nomeCompleto: true,
-        dataCadastro: true,
-      },
+      include: latestSubscriptionInclude,
     });
 
     if (!paciente) {
       return res.status(404).json({ error: "Paciente não encontrado." });
     }
 
-    res.json(paciente);
+    res.json(mapPacienteToPortalPayload(paciente));
   },
 );
 
 app.post("/auth/register", async (req, res) => {
-  const { nomeCompleto, telefone, senha } = req.body;
+  const nomeCompleto = String(req.body?.nomeCompleto ?? "").trim();
+  const telefone = normalizeDigitsOnly(req.body?.telefone);
+  const senha = String(req.body?.senha ?? "");
 
   if (!telefone || !senha || !nomeCompleto) {
     return res.status(400).json({
@@ -217,14 +215,11 @@ app.post("/auth/register", async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const senhaHash = await bcrypt.hash(senha, salt);
 
-    const novaPaciente = await prisma.paciente.create({
-      data: {
-        telefone,
-        nomeCompleto,
-        senhaHash,
-        apiKey: randomUUID(),
-        isSubscriber: false,
-      },
+    const novaPaciente = await pacienteRepository.createByTelefone({
+      telefone,
+      nomeCompleto,
+      senhaHash,
+      apiKey: randomUUID(),
     });
 
     res.status(201).json({
@@ -247,7 +242,7 @@ app.post("/auth/register", async (req, res) => {
 });
 
 app.get("/auth/telefone-disponivel/:telefone", async (req, res) => {
-  const { telefone } = req.params;
+  const telefone = normalizeDigitsOnly(req.params.telefone);
 
   if (!telefone) {
     return res.status(400).json({ error: "Telefone não informado." });
@@ -267,7 +262,8 @@ app.get("/auth/telefone-disponivel/:telefone", async (req, res) => {
 });
 
 app.post("/auth/login", async (req, res) => {
-  const { telefone, senha } = req.body;
+  const telefone = normalizeDigitsOnly(req.body?.telefone);
+  const senha = String(req.body?.senha ?? "");
 
   if (!telefone || !senha) {
     return res
@@ -276,13 +272,18 @@ app.post("/auth/login", async (req, res) => {
   }
 
   try {
-    const paciente = await prisma.paciente.findUnique({ where: { telefone } });
+    const paciente = await prisma.paciente.findUnique({
+      where: { telefone },
+      include: latestSubscriptionInclude,
+    });
 
     if (!paciente) {
       return res.status(401).json({ error: "Credenciais inválidas." });
     }
 
-    const senhaValida = await bcrypt.compare(senha, paciente.senhaHash);
+    const senhaValida = paciente.senhaHash
+      ? await bcrypt.compare(senha, paciente.senhaHash)
+      : false;
 
     if (!senhaValida) {
       return res.status(401).json({ error: "Credenciais inválidas." });
@@ -297,14 +298,7 @@ app.post("/auth/login", async (req, res) => {
     res.json({
       message: "Login bem-sucedido!",
       token,
-      paciente: {
-        telefone: paciente.telefone,
-        nomeCompleto: paciente.nomeCompleto,
-        nome: paciente.nomeCompleto,
-        isSubscriber: paciente.isSubscriber,
-        subscriptionStartedAt: paciente.subscriptionStartedAt,
-        subscriptionCanceledAt: paciente.subscriptionCanceledAt,
-      },
+      paciente: mapPacienteToPortalPayload(paciente),
     });
   } catch (e) {
     console.error("Erro no login:", e);
@@ -339,7 +333,7 @@ app.get("/questionario/status", authenticateToken, async (req, res) => {
     const [pacientePerfil, ultimosPesos] = await Promise.all([
       prisma.paciente.findUnique({
         where: { telefone: pacienteTelefone },
-        select: { alturaM: true },
+        select: { id: true, alturaM: true },
       }),
       prisma.historicoPeso.findMany({
         where: { pacienteTelefone },
@@ -467,7 +461,7 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
     const [pacientePerfil, ultimoQuestionario] = await Promise.all([
       prisma.paciente.findUnique({
         where: { telefone: pacienteTelefone },
-        select: { alturaM: true },
+        select: { id: true, alturaM: true },
       }),
       prisma.questionarioConcluido.findFirst({
         where: { pacienteTelefone },
@@ -599,6 +593,7 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
       const questionario = await tx.questionarioConcluido.create({
         data: {
           pacienteTelefone,
+          pacienteId: pacientePerfil.id,
           pontuacaoTotal,
           percentualGlobal: parseFloat(percentualGlobal.toFixed(2)),
           classificacao,
@@ -608,7 +603,7 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
       const pontuacoesParaCriar = [];
 
       for (const pilarIdStr in resultadosPorPilar) {
-        const pilarId = parseInt(pilarIdStr, 10);
+        const pilarId = pilarIdStr;
         const pontuacaoData = resultadosPorPilar[pilarId];
 
         pontuacoesParaCriar.push({
@@ -626,6 +621,7 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
         await tx.answer.createMany({
           data: answersToSave.map((answer) => ({
             ...answer,
+            pacienteId: pacientePerfil.id,
             questionarioConcluidoId: questionario.id,
           })),
         });
@@ -647,7 +643,9 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
       await tx.historicoPeso.create({
         data: {
           pacienteTelefone,
+          pacienteId: pacientePerfil.id,
           pesoKg: parseFloat(pesoAtualKg.toFixed(2)),
+          alturaM: parseFloat(alturaMParaCalculo.toFixed(2)),
           imc: imcAtual,
         },
       });
@@ -905,7 +903,7 @@ app.put(
   "/integrations/pacientes/telefone/:telefone",
   authenticateService,
   async (req, res) => {
-    const { telefone } = req.params;
+    const telefone = normalizeDigitsOnly(req.params.telefone);
     const { nomeCompleto } = req.body;
 
     if (!nomeCompleto || typeof nomeCompleto !== "string") {
@@ -913,9 +911,9 @@ app.put(
     }
 
     try {
-      const paciente = await prisma.paciente.update({
-        where: { telefone },
-        data: { nomeCompleto },
+      const paciente = await pacienteRepository.updateProfileByTelefone(telefone, {
+        nomeCompleto,
+        nome: nomeCompleto,
       });
 
       res.json({
@@ -957,4 +955,11 @@ async function startServer() {
   }
 }
 
-startServer();
+const isDirectRun =
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  startServer();
+}
+
+export default app;

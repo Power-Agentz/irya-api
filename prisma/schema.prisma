@@ -8,100 +8,157 @@ datasource db {
 }
 
 model Paciente {
-  telefone                String                 @id
-  nomeCompleto            String
-  senhaHash               String
-  dataCadastro            DateTime               @default(now())
-  alturaM                 Float?                 @map("altura_m")
-  isSubscriber            Boolean                @default(false) @map("is_subscriber")
-  subscriptionStartedAt   DateTime?              @map("subscription_started_at")
-  subscriptionCanceledAt  DateTime?              @map("subscription_canceled_at")
-  apiKey                  String?                @unique @map("api_key")
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  telefone       String          @unique @map("whatsapp")
+  nome           String?
+  apelido        String?
+  nomeCompleto   String?         @map("nome_completo")
+  senhaHash      String?         @map("senha_hash")
+  apiKey         String?         @map("api_key")
+  alturaM        Float?          @map("altura_m")
+  dataCadastro   DateTime        @default(now()) @map("data_cadastro")
+  dataCriacao    DateTime?       @default(now()) @map("criado_em")
+  cpf            String?
+  email          String?
 
   historicoPesos          HistoricoPeso[]
   questionariosConcluidos QuestionarioConcluido[]
   answers                 Answer[]
+  assinaturas             Assinatura[]
+  dadosMev                DadosMev[]
 
-  @@map("pacientes")
+  @@map("irya_users")
+}
+
+model Assinatura {
+  id                   String    @id @default(dbgenerated("extensions.uuid_generate_v4()")) @db.Uuid
+  pacienteTelefone     String?   @map("whatsapp")
+  pacienteId           String?   @map("irya_user_id") @db.Uuid
+  tipoPlano            String    @default("gratuito") @map("tipo_plano")
+  inicioTesteEm        DateTime? @default(now()) @map("inicio_teste_em")
+  fimTesteEm           DateTime? @map("fim_teste_em")
+  fimPeriodoAtual      DateTime? @map("fim_periodo_atual")
+  dataConversao        DateTime? @map("data_conversao")
+  statusPagamento      String    @default("ativo") @map("status_pagamento")
+  criadoEm             DateTime? @default(now()) @map("criado_em")
+  atualizadoEm         DateTime? @default(now()) @map("atualizado_em")
+  asaasSubscriptionId  String?   @map("asaas_subscription_id")
+  asaasCustomerId      String?   @map("asaas_customer_id")
+  apiOrigem            String?   @default("portal_irya") @map("api_origem")
+
+  paciente             Paciente? @relation(fields: [pacienteId], references: [id], onDelete: Cascade)
+
+  @@map("irya_assinaturas")
 }
 
 model HistoricoPeso {
-  id               Int      @id @default(autoincrement())
-  pacienteTelefone String   @map("paciente_telefone")
-  pesoKg           Float
+  id               String    @id @default(dbgenerated("extensions.uuid_generate_v4()")) @db.Uuid
+  pacienteTelefone String    @map("whatsapp")
+  pacienteId       String?   @map("irya_user_id") @db.Uuid
+  pesoKg           Float     @map("peso_kg")
+  alturaM          Float?    @map("altura_m")
   imc              Float?
-  dataRegistro     DateTime @default(now())
+  dataRegistro     DateTime  @default(now()) @map("data_registro")
+  origem           String    @default("portal_irya")
+  criadoEm         DateTime  @default(now()) @map("criado_em")
 
-  paciente         Paciente @relation(fields: [pacienteTelefone], references: [telefone])
+  paciente         Paciente? @relation(fields: [pacienteId], references: [id], onDelete: Cascade)
 
-  @@map("historico_pesos")
+  @@map("irya_historico_pesos")
 }
 
 model Pilar {
-  id              Int                 @id @default(autoincrement())
-  nomePilar       String              @unique @map("nome_pilar")
+  id              String               @id @default(dbgenerated("extensions.uuid_generate_v4()")) @db.Uuid
+  nomePilar       String               @unique @map("nome_pilar")
   descricao       String?
-  pontuacaoMaxima Int                 @map("pontuacao_maxima")
+  pontuacaoMaxima Int                  @map("pontuacao_maxima")
+  criadoEm        DateTime             @default(now()) @map("criado_em")
 
   perguntas       Pergunta[]
   pontuacoes      PontuacaoPorPilar[]
 
-  @@map("pilares")
+  @@map("irya_pilares")
 }
 
 model Pergunta {
-  id            Int      @id @default(autoincrement())
-  pilarId       Int
+  id            String   @id @default(dbgenerated("extensions.uuid_generate_v4()")) @db.Uuid
+  pilarId       String   @map("pilar_id") @db.Uuid
   textoPergunta String   @map("texto_pergunta")
   ordem         Int
   ehInvertida   Boolean  @default(false) @map("eh_invertida")
+  criadoEm      DateTime @default(now()) @map("criado_em")
 
-  pilar         Pilar    @relation(fields: [pilarId], references: [id])
+  pilar         Pilar    @relation(fields: [pilarId], references: [id], onDelete: Restrict)
 
-  @@map("perguntas")
+  @@map("irya_perguntas")
 }
 
 model QuestionarioConcluido {
-  id               Int                 @id @default(autoincrement())
-  pacienteTelefone String              @map("paciente_telefone")
-  pontuacaoTotal   Int                 @map("pontuacao_total")
-  percentualGlobal Float               @map("percentual_global")
+  id               String               @id @default(dbgenerated("extensions.uuid_generate_v4()")) @db.Uuid
+  pacienteTelefone String               @map("whatsapp")
+  pacienteId       String?              @map("irya_user_id") @db.Uuid
+  pontuacaoTotal   Int                  @map("pontuacao_total")
+  percentualGlobal Float                @map("percentual_global")
   classificacao    String
-  dataConclusao    DateTime            @default(now()) @map("data_conclusao")
+  dataConclusao    DateTime             @default(now()) @map("data_conclusao")
+  origem           String               @default("portal_irya")
+  criadoEm         DateTime             @default(now()) @map("criado_em")
 
-  paciente         Paciente            @relation(fields: [pacienteTelefone], references: [telefone])
+  paciente         Paciente?            @relation(fields: [pacienteId], references: [id], onDelete: Cascade)
   pontuacoes       PontuacaoPorPilar[]
   answers          Answer[]
 
-  @@unique([pacienteTelefone, dataConclusao], name: "unique_monthly_submission")
-  @@map("questionarios_concluidos")
+  @@map("irya_questionarios_concluidos")
 }
 
 model PontuacaoPorPilar {
-  id                      Int                    @id @default(autoincrement())
-  questionarioConcluidoId Int                    @map("questionario_concluido_id")
-  pilarId                 Int
-  pontuacaoObtida         Int                    @map("pontuacao_obtida")
+  id                      String                @id @default(dbgenerated("extensions.uuid_generate_v4()")) @db.Uuid
+  questionarioConcluidoId String                @map("questionario_concluido_id") @db.Uuid
+  pilarId                 String                @map("pilar_id") @db.Uuid
+  pontuacaoObtida         Int                   @map("pontuacao_obtida")
+  criadoEm                DateTime              @default(now()) @map("criado_em")
 
-  questionarioConcluido   QuestionarioConcluido  @relation(fields: [questionarioConcluidoId], references: [id])
-  pilar                   Pilar                  @relation(fields: [pilarId], references: [id])
+  questionarioConcluido   QuestionarioConcluido @relation(fields: [questionarioConcluidoId], references: [id], onDelete: Cascade)
+  pilar                   Pilar                 @relation(fields: [pilarId], references: [id], onDelete: Restrict)
 
-  @@map("pontuacoes_por_pilar")
+  @@map("irya_pontuacoes_por_pilar")
 }
 
 model Answer {
-  id                      Int                    @id @default(autoincrement())
-  pacienteTelefone        String                 @map("patient_id")
-  questionarioConcluidoId Int?                   @map("questionario_concluido_id")
+  id                      String                 @id @default(dbgenerated("extensions.uuid_generate_v4()")) @db.Uuid
+  pacienteTelefone        String                 @map("whatsapp")
+  pacienteId              String?                @map("irya_user_id") @db.Uuid
+  questionarioConcluidoId String?                @map("questionario_concluido_id") @db.Uuid
   questionText            String                 @map("question_text")
   answerValue             Int                    @map("answer_value")
   pilarCategory           String                 @map("pilar_category")
   createdAt               DateTime               @default(now()) @map("created_at")
 
-  paciente                Paciente               @relation(fields: [pacienteTelefone], references: [telefone])
-  questionarioConcluido   QuestionarioConcluido? @relation(fields: [questionarioConcluidoId], references: [id])
+  paciente                Paciente?              @relation(fields: [pacienteId], references: [id], onDelete: Cascade)
+  questionarioConcluido   QuestionarioConcluido? @relation(fields: [questionarioConcluidoId], references: [id], onDelete: Cascade)
 
   @@index([pacienteTelefone, createdAt], map: "answers_patient_id_created_at_idx")
-  @@index([pilarCategory], map: "answers_pilar_category_idx")
-  @@map("answers")
+  @@map("irya_answers")
+}
+
+model DadosMev {
+  id                     String    @id @default(dbgenerated("extensions.uuid_generate_v4()")) @db.Uuid
+  pacienteTelefone       String?   @map("whatsapp")
+  pacienteId             String?   @map("irya_user_id") @db.Uuid
+  dataPreenchimento      DateTime? @default(now()) @map("data_preenchimento")
+  scoreNutricao          Int?      @map("score_nutricao")
+  scoreMovimento         Int?      @map("score_movimento")
+  scoreSono              Int?      @map("score_sono")
+  scoreEmocoes           Int?      @map("score_emocoes")
+  scoreConexoes          Int?      @map("score_conexoes")
+  scoreTotal             Int?      @map("score_total")
+  percentualVitalidade   Int?      @map("percentual_vitalidade")
+  classificacaoVitalidade String?  @map("classificacao_vitalidade")
+  dorPrincipal           String?   @map("dor_principal")
+  melhoriasIdentificadas String?   @map("melhorias_identificadas")
+  respostasBrutas        Json?     @default("{}") @map("respostas_brutas")
+
+  paciente               Paciente? @relation(fields: [pacienteId], references: [id], onDelete: Cascade)
+
+  @@map("irya_dados_mev")
 }
