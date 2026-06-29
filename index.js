@@ -43,12 +43,8 @@ app.use(express.json());
 
 const defaultCorsOrigins = [
   "http://localhost:5173",
-  "https://mev.clinicawhim.com.br",
-  "https://www.mev.clinicawhim.com.br",
   "https://irya-web.vercel.app/",
-  "https://www.irya-web.vercel.app/",
-  "https://portalirya.clinicawhim.com.br/",
-  "https://minhairya.clinicawhim.com.br"
+  "https://minhairya.clinicawhim.com.br",
 ];
 
 const envCorsOrigins = (process.env.CORS_ORIGIN ?? "")
@@ -56,9 +52,9 @@ const envCorsOrigins = (process.env.CORS_ORIGIN ?? "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-const corsAllowList = [...new Set([...defaultCorsOrigins, ...envCorsOrigins])].map(
-  (origin) => origin.replace(/\/$/, ""),
-);
+const corsAllowList = [
+  ...new Set([...defaultCorsOrigins, ...envCorsOrigins]),
+].map((origin) => origin.replace(/\/$/, ""));
 
 const corsOptions = {
   origin(origin, callback) {
@@ -120,7 +116,8 @@ function authenticateService(req, res, next) {
 
 function authenticateAdmin(req, res, next) {
   const providedKey = req.headers["x-admin-key"] ?? req.headers["x-api-key"];
-  const expectedKey = process.env.ADMIN_ACCESS_KEY ?? process.env.SERVICE_API_KEY;
+  const expectedKey =
+    process.env.ADMIN_ACCESS_KEY ?? process.env.SERVICE_API_KEY;
 
   if (!providedKey || !expectedKey || providedKey !== expectedKey) {
     return res.status(403).json({ error: "Acesso negado (admin)." });
@@ -627,7 +624,10 @@ app.post("/questionario/submeter", authenticateToken, async (req, res) => {
         });
       }
 
-      if (pacientePerfil.alturaM === null || pacientePerfil.alturaM === undefined) {
+      if (
+        pacientePerfil.alturaM === null ||
+        pacientePerfil.alturaM === undefined
+      ) {
         await tx.paciente.update({
           where: { telefone: pacienteTelefone },
           data: {
@@ -693,7 +693,9 @@ app.get("/api/bot/scores/:phone", authenticateBotApiKey, async (req, res) => {
     return res.json(payload);
   } catch (e) {
     console.error("Erro ao buscar pontuações para bot:", e);
-    return res.status(500).json({ error: "Erro interno ao buscar pontuações." });
+    return res
+      .status(500)
+      .json({ error: "Erro interno ao buscar pontuações." });
   }
 });
 
@@ -716,7 +718,10 @@ app.get(
     const { phone, pilar_name: pilarName } = req.params;
 
     try {
-      const payload = await botService.getAnswersByPhoneAndPilar(phone, pilarName);
+      const payload = await botService.getAnswersByPhoneAndPilar(
+        phone,
+        pilarName,
+      );
       return res.json(payload);
     } catch (e) {
       console.error("Erro ao buscar respostas por pilar para bot:", e);
@@ -756,7 +761,9 @@ app.post("/webhooks/asaas", async (req, res) => {
     return res.status(200).json(result);
   } catch (e) {
     console.error("Erro ao processar webhook Asaas:", e);
-    return res.status(500).json({ error: "Erro interno ao processar webhook." });
+    return res
+      .status(500)
+      .json({ error: "Erro interno ao processar webhook." });
   }
 });
 
@@ -782,7 +789,10 @@ app.post("/subscription/checkout", authenticateToken, async (req, res) => {
   const { cpfCnpj } = req.body ?? {};
 
   try {
-    const result = await subscriptionService.createMonthlyCheckout(phone, cpfCnpj);
+    const result = await subscriptionService.createMonthlyCheckout(
+      phone,
+      cpfCnpj,
+    );
     if (!result.ok) {
       return res.status(result.status).json({
         error: result.error,
@@ -826,7 +836,9 @@ app.get("/admin/overview", authenticateAdmin, async (req, res) => {
     return res.json(overview);
   } catch (e) {
     console.error("Erro ao buscar overview admin:", e);
-    return res.status(500).json({ error: "Não foi possível carregar o overview." });
+    return res
+      .status(500)
+      .json({ error: "Não foi possível carregar o overview." });
   }
 });
 
@@ -843,17 +855,21 @@ app.get("/admin/pacientes", authenticateAdmin, async (req, res) => {
   }
 });
 
-app.get("/admin/questionarios-concluidos", authenticateAdmin, async (req, res) => {
-  try {
-    const questionarios = await adminService.getQuestionariosConcluidos();
-    return res.json(questionarios);
-  } catch (e) {
-    console.error("Erro ao buscar questionários concluídos:", e);
-    return res.status(500).json({
-      error: "Não foi possível carregar os questionários concluídos.",
-    });
-  }
-});
+app.get(
+  "/admin/questionarios-concluidos",
+  authenticateAdmin,
+  async (req, res) => {
+    try {
+      const questionarios = await adminService.getQuestionariosConcluidos();
+      return res.json(questionarios);
+    } catch (e) {
+      console.error("Erro ao buscar questionários concluídos:", e);
+      return res.status(500).json({
+        error: "Não foi possível carregar os questionários concluídos.",
+      });
+    }
+  },
+);
 
 app.get("/admin/pontuacoes", authenticateAdmin, async (req, res) => {
   try {
@@ -861,7 +877,9 @@ app.get("/admin/pontuacoes", authenticateAdmin, async (req, res) => {
     return res.json(pontuacoes);
   } catch (e) {
     console.error("Erro ao buscar pontuações admin:", e);
-    return res.status(500).json({ error: "Não foi possível carregar pontuações." });
+    return res
+      .status(500)
+      .json({ error: "Não foi possível carregar pontuações." });
   }
 });
 
@@ -876,7 +894,9 @@ app.get("/admin/pacientes/:phone", authenticateAdmin, async (req, res) => {
     return res.json(paciente);
   } catch (e) {
     console.error("Erro ao buscar detalhes do paciente:", e);
-    return res.status(500).json({ error: "Não foi possível carregar os detalhes." });
+    return res
+      .status(500)
+      .json({ error: "Não foi possível carregar os detalhes." });
   }
 });
 
@@ -895,7 +915,9 @@ app.delete("/admin/pacientes/:phone", authenticateAdmin, async (req, res) => {
     });
   } catch (e) {
     console.error("Erro ao excluir paciente:", e);
-    return res.status(500).json({ error: "Não foi possível excluir o cadastro." });
+    return res
+      .status(500)
+      .json({ error: "Não foi possível excluir o cadastro." });
   }
 });
 
@@ -911,10 +933,13 @@ app.put(
     }
 
     try {
-      const paciente = await pacienteRepository.updateProfileByTelefone(telefone, {
-        nomeCompleto,
-        nome: nomeCompleto,
-      });
+      const paciente = await pacienteRepository.updateProfileByTelefone(
+        telefone,
+        {
+          nomeCompleto,
+          nome: nomeCompleto,
+        },
+      );
 
       res.json({
         message: "Paciente atualizado com sucesso.",
